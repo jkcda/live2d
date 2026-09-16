@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   LLM_PRESETS,
   loadLLMConfig,
@@ -38,14 +38,20 @@ onMounted(() => {
   ttsSpeed.value = tts.speed ?? 1
 })
 
-function applyPreset(id: string) {
-  const p = LLM_PRESETS.find((x) => x.id === id)
-  if (!p) return
-  baseURL.value = p.baseURL
-  model.value = p.model
-}
+/*
+ * ★ 边改边存。
+ *
+ * 为什么不能只靠「保存」按钮：面板的输入框只在点保存那一刻才落盘，
+ * 关掉面板（或只点了「试听」这种只落盘 TTS 的按钮）就会把刚填的内容丢掉 ——
+ * 用户看到的现象是「每次打开设置都是重置的」。
+ * 对桌面应用来说，设置面板不该存在「忘了保存」这种失败模式。
+ *
+ * 所以：输入变化 → 400ms 后落盘；面板关闭 → 立刻落盘兜底。
+ */
+let persistTimer: number | undefined
 
-function save() {
+/** 立即把当前输入框的值落盘 */
+function persistNow(): void {
   saveLLMConfig({
     baseURL: baseURL.value.trim(),
     apiKey: apiKey.value.trim(),
@@ -57,9 +63,42 @@ function save() {
     voice: ttsVoice.value.trim() || 'default',
     speed: ttsSpeed.value,
   })
+}
+
+/** 落盘并让新配置对当前会话生效 */
+function persistAndApply(notify = false): void {
+  persistNow()
   reconfigureSession()
-  llmTest.value = '已保存'
-  ttsTest.value = ''
+  if (notify) {
+    llmTest.value = '已保存'
+    ttsTest.value = ''
+  }
+}
+
+function schedulePersist(): void {
+  window.clearTimeout(persistTimer)
+  // 防抖：别每敲一个字符就重建会话
+  persistTimer = window.setTimeout(() => persistAndApply(), 400)
+}
+
+watch([baseURL, apiKey, model, temperature, ttsURL, ttsVoice, ttsSpeed], schedulePersist)
+
+onUnmounted(() => {
+  // 关面板/切走时兜底 —— 这时防抖可能还没触发
+  window.clearTimeout(persistTimer)
+  persistNow()
+})
+
+function applyPreset(id: string) {
+  const p = LLM_PRESETS.find((x) => x.id === id)
+  if (!p) return
+  baseURL.value = p.baseURL
+  model.value = p.model
+}
+
+function save() {
+  window.clearTimeout(persistTimer)
+  persistAndApply(true)
 }
 
 /** 用最小成本验证 key 是否可用：只要一个 token */
@@ -94,13 +133,33 @@ async function testLLM() {
 
 async function testTTS() {
   ttsTest.value = '探测中…'
-  saveTTSConfig({
-    baseURL: ttsURL.value.trim(),
-    voice: ttsVoice.value.trim() || 'default',
-    speed: ttsSpeed.value,
-  })
+  // 先把输入框的值落盘，否则探测用的是上一次保存的地址
+  persistNow()
   const ok = await voiceOutput.health()
   ttsTest.value = ok ? '服务在线' : '连不上（服务未启动？）'
+}
+
+/** 试听用的句子。短、含中文声调和常见音素，能听出音色和口型对不对 */
+const TRIAL_TEXT = '你好呀，我是 Nexus。现在你听到的是我在说话。'
+
+/**
+ * 试听。
+ *
+ * 为什么值得单独做：它是**不用配 LLM key** 就能听到声音的唯一入口。
+ * 没有它，验证「语音输出」这条链路必须先去搞一个 API key，
+ * 一旦没声音还分不清是 key、是服务、还是引擎。
+ */
+async function trialTTS() {
+  // 先把输入框里的值落盘 —— preview 读的是已保存的配置
+  persistNow()
+
+  ttsTest.value = '试听中…'
+  try {
+    await voiceOutput.preview(TRIAL_TEXT)
+    ttsTest.value = '试听完成'
+  } catch (err) {
+    ttsTest.value = `失败：${err instanceof Error ? err.message : String(err)}`
+  }
 }
 </script>
 
@@ -157,7 +216,8 @@ async function testTTS() {
       <section>
         <h3>语音服务</h3>
         <p class="note">
-          CosyVoice 2 推理服务，跑在本地或云 GPU 上。服务没起来时只是不出声，不影响文字对话。
+          推理服务地址：Windows 上可以用内置 SAPI 出真语音（<code>NEXUS_TTS_ENGINE=sapi</code>），
+          正式音色是 CosyVoice 2。服务没起来时只是不出声，不影响文字对话。
         </p>
 
         <label>
@@ -177,12 +237,14 @@ async function testTTS() {
 
         <div class="actions">
           <button class="btn" @click="testTTS">探测服务</button>
+          <button class="btn" @click="trialTTS">试听</button>
           <span class="hint">{{ ttsTest }}</span>
         </div>
       </section>
     </div>
 
     <footer class="foot">
+      <span class="saved-hint">改动会自动保存</span>
       <button class="btn primary" @click="save">保存</button>
     </footer>
   </div>
@@ -373,13 +435,22 @@ input[type='range'] {
 }
 
 .foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
 }
 
+.saved-hint {
+  flex: 1;
+  font-size: 11px;
+  color: #6a6a74;
+}
+
 .foot .btn {
-  width: 100%;
-  padding: 7px;
+  flex: 0 0 auto;
+  padding: 7px 18px;
 }
 </style>

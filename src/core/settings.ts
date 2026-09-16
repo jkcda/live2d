@@ -3,6 +3,11 @@
  *
  * 存在 localStorage —— 单人桌面应用，不需要更重的方案。
  * API key 明文存本地是这里的正常取舍；要同步到多设备时再换系统钥匙串。
+ *
+ * **写入时机**：由设置面板在输入变化时自动落盘（防抖 400ms，关面板再兜底一次），
+ * 不依赖用户点「保存」。见 `SettingsPanel.vue` 的 persistNow/schedulePersist。
+ * 不要改回「只在点保存时写」—— 那种模式下关掉面板就会丢掉刚填的内容，
+ * 用户看到的现象是「设置每次都重置」。
  */
 import type { TTSConfig } from './audio/tts'
 import type { LLMConfig } from './agent/types'
