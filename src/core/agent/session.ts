@@ -91,9 +91,16 @@ export class ChatSession {
         yield ev
       }
 
-      // 收尾：把最后没带标点的残句也送出去
-      const rest = splitter.flush()
-      if (rest) this.hooks.onSentence?.(rest)
+      // 收尾：把最后没带标点的残句也送出去。
+      //
+      // ★ 但被打断时绝不能送：那样用户刚打断，她立刻又把半句话读出来 ——
+      //   实测是「打断后 1ms 残句进队列，播放队列重新出声」，且残句往往还是
+      //   半截的（比如只到「要不要一起出去」）。
+      //   打断要贯穿到链路的最后一步，包括这个收尾。
+      if (!controller.signal.aborted) {
+        const rest = splitter.flush()
+        if (rest) this.hooks.onSentence?.(rest)
+      }
     } finally {
       this.controller = null
 
