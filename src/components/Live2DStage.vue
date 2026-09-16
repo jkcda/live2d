@@ -155,10 +155,16 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 24px;
+  padding: 24px 18px;
   text-align: center;
   color: #9a9aa4;
   font-size: 13px;
+  /* 长 URL 和代码片段不能把容器撑破 */
+  overflow-wrap: anywhere;
+}
+
+.overlay > * {
+  max-width: 100%;
 }
 
 .overlay.failed .title {
@@ -172,6 +178,7 @@ onUnmounted(() => {
 .hint {
   line-height: 1.8;
   color: #7a7a84;
+  overflow-wrap: anywhere;
 }
 
 .hint code,
@@ -188,16 +195,17 @@ onUnmounted(() => {
 }
 
 .detail {
-  max-width: 100%;
-  max-height: 120px;
-  overflow: auto;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 140px;
+  overflow-y: auto;
   padding: 8px 10px;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.35);
   color: #c88;
   text-align: left;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .test-bar {
