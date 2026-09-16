@@ -84,11 +84,19 @@ live2d/
 │   │   │   └── player.ts        # 音频播放 + 振幅提取 + 打断
 │   │   ├── live2d/
 │   │   │   ├── engine.ts        # 渲染引擎适配层（隔离第三方 API）
+│   │   │   ├── cubism.ts        # Cubism Core 运行时加载
+│   │   │   ├── models.ts        # 模型自动探测
 │   │   │   ├── lipsync.ts       # 振幅 → 口型参数
 │   │   │   └── idle.ts          # 程序化待机动画
-│   │   └── agent/               # Agent 层（待建）
+│   │   └── agent/
+│   │       ├── types.ts         # AgentEvent / ChatMessage / LLMConfig
+│   │       ├── llm.ts           # SSE 流式客户端 + 按标点切句
+│   │       ├── persona.ts       # 人设 → system prompt
+│   │       └── session.ts       # 对话编排（历史裁剪 / 逐句回调 / 打断）
 │   └── styles/
-├── public/models/               # Live2D 模型（不入库，见下）
+├── public/
+│   ├── lib/                     # Cubism Core 运行时（不入库）
+│   └── models/                  # Live2D 模型（不入库，见下）
 ├── python/                      # 推理服务（待建）
 └── docs/
 ```
@@ -100,13 +108,30 @@ live2d/
 ```bash
 pnpm install
 
-# 准备一个 Live2D 模型放到 public/models/ 下（见下一节）
-# 然后在 src/components/Live2DStage.vue 里改 MODEL_PATH
+# 1. 放入 Cubism Core 运行时（必需，见下）
+# 2. 放入一个 Live2D 模型（必需，见下）
 
 pnpm dev
 ```
 
-### 模型资源
+### 第一步：Cubism Core 运行时（必需）
+
+Cubism 3/4/5 模型依赖一个外部运行时 `live2dcubismcore.min.js`，它**不随 npm 包分发**，必须自己获取。
+
+1. 打开 <https://www.live2d.com/download/cubism-sdk/download-web/>，下载 **Cubism SDK for Web**
+2. 从解压后的 `Core/` 目录里取出 `live2dcubismcore.min.js`
+3. 放到本项目的 `public/lib/` 下
+
+```
+public/lib/
+└── live2dcubismcore.min.js
+```
+
+> **为什么不从 npm 装**：社区里存在若干第三方再分发包，但它们的来源和授权状态都无法确认（有的甚至给 Live2D 的专有二进制标了宽松开源协议）。这个文件受 Live2D SDK 授权条款约束，请走官方渠道，使用即表示接受其条款。
+
+缺这个文件时不会白屏 —— 控制台会给出明确提示和下载地址。
+
+### 第二步：模型资源
 
 `public/models/` 目录不入库 —— Live2D 模型受官方许可约束，随仓库分发会有版权问题。
 
@@ -125,7 +150,7 @@ public/models/
 
 Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/sample/>
 
-下载后解压到 `public/models/`，然后改 `src/components/Live2DStage.vue` 里的 `MODEL_URL`。
+下载后解压到 `public/models/<名字>/` 即可，**通常不用改代码** —— `src/core/live2d/models.ts` 会自动按常见命名探测（Haru / Hiyori / Kei / Mao / Natori / Rice / Wanko / Shizuku / Mark / MIO）。命名不常见时，在 `Live2DStage.vue` 顶部把 `EXPLICIT_MODEL` 填成相对路径，例如 `'Haru/Haru.model3.json'`。
 
 | 模型 | 说明 |
 |---|---|

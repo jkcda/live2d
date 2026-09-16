@@ -34,11 +34,27 @@
   "build": {
     "appId": "com.nexus.live2d",
     "productName": "NexusLive2D",
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "dist-electron/**/*"],
-    "extraResources": [{ "from": "public/models", "to": "models" }],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg" },
-    "linux": { "target": "AppImage" }
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "public/models",
+        "to": "models"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   }
 }

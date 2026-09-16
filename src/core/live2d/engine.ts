@@ -4,8 +4,20 @@
  * 第三方引擎（untitled-pixi-live2d-engine）的 API 差异全部收敛在这里，
  * 上层只依赖 ModelHandle / Stage 两个接口 —— 换引擎只改这个文件。
  */
-import { Application } from 'pixi.js'
-import { Live2DModel } from 'untitled-pixi-live2d-engine'
+import { Application, extensions } from 'pixi.js'
+import { Live2DModel, Live2DPlugin } from 'untitled-pixi-live2d-engine'
+import { ensureCubismCore } from './cubism'
+
+/**
+ * Live2D 是一个自定义渲染管线，必须在创建 Application 之前注册进 pixi 的扩展表，
+ * 否则模型能加载但画不出来（画布全透明）。
+ */
+let pluginRegistered = false
+function registerLive2DPlugin(): void {
+  if (pluginRegistered) return
+  extensions.add(Live2DPlugin)
+  pluginRegistered = true
+}
 
 /**
  * Cubism 2 与 Cubism 4/5 的 coreModel 是两套类型，
@@ -51,10 +63,16 @@ function resolveCoreModel(model: Live2DModel): CoreModelLike | null {
 }
 
 export async function createStage(host: HTMLElement, opts: CreateStageOptions): Promise<Stage> {
+  // 顺序不能变：先注册渲染管线，再确保 Cubism 运行时，最后才建 Application
+  registerLive2DPlugin()
+  await ensureCubismCore()
+
   const app = new Application()
   await app.init({
     backgroundAlpha: 0,
     antialias: true,
+    // Live2D 走自定义 WebGL 管线，必须显式要求 webgl 渲染器
+    preference: 'webgl',
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
     resizeTo: host,

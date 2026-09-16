@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { createStage, type Stage } from '@/core/live2d/engine'
+import { resolveModelUrl } from '@/core/live2d/models'
 import { LipSyncDriver } from '@/core/live2d/lipsync'
 import { IdleAnimator } from '@/core/live2d/idle'
 import { AudioPlayer } from '@/core/audio/player'
 
-/** 换成你自己的模型 —— 放到 public/models/ 下 */
-const MODEL_URL = `${import.meta.env.BASE_URL}models/Haru/Haru.model3.json`
+/**
+ * 模型不随仓库分发（受 Live2D 授权条款限制）。
+ * 留空则自动探测 public/models/ 下的常见命名；
+ * 想固定某个模型就填相对路径，例如 'Haru/Haru.model3.json'。
+ */
+const EXPLICIT_MODEL = ''
 
 const host = ref<HTMLElement | null>(null)
 const status = ref('模型加载中…')
@@ -77,7 +82,8 @@ onMounted(async () => {
   if (!el) return
 
   try {
-    stage = await createStage(el, { url: MODEL_URL })
+    const url = await resolveModelUrl(EXPLICIT_MODEL || undefined)
+    stage = await createStage(el, { url })
     idle = new IdleAnimator()
     lipsync = new LipSyncDriver()
 
@@ -111,8 +117,9 @@ onUnmounted(() => {
     <div v-if="status" class="overlay" :class="{ failed }">
       <p class="title">{{ failed ? '模型加载失败' : status }}</p>
       <p v-if="failed" class="hint">
-        把 Live2D 模型放到 <code>public/models/</code> 下，<br />
-        并修改本组件的 <code>MODEL_URL</code> 指向 <code>.model3.json</code>
+        模型不随仓库分发（受 Live2D 授权条款限制）。<br />
+        下载一个 Cubism 3/4/5 模型解压到 <code>public/models/&lt;名字&gt;/</code>，<br />
+        或在本组件顶部把 <code>EXPLICIT_MODEL</code> 指向具体的 <code>.model3.json</code>
       </p>
       <pre v-if="failed" class="detail">{{ status }}</pre>
     </div>

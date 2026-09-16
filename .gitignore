@@ -10,6 +10,10 @@ release/
 public/models/*
 !public/models/.gitkeep
 
+# Cubism Core 运行时同理，从官方 SDK 获取后放到 public/lib/ 下
+public/lib/*
+!public/lib/.gitkeep
+
 # ── Python 推理服务 ──
 python/.venv/
 python/venv/
