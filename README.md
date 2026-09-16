@@ -76,12 +76,17 @@ live2d/
 │   ├── main.ts                  # 窗口：透明/置顶/点击穿透/全局快捷键
 │   └── preload.ts               # 暴露给渲染进程的桥接口
 ├── src/
-│   ├── App.vue                  # 根组件
+│   ├── App.vue                  # 根组件：舞台 + 控制条 + 面板挂载
 │   ├── components/
-│   │   └── Live2DStage.vue      # Live2D 舞台 + 每帧参数合成
+│   │   ├── Live2DStage.vue      # Live2D 舞台 + 每帧参数合成
+│   │   ├── ChatPanel.vue        # 对话界面（流式显示 + 打断）
+│   │   └── SettingsPanel.vue    # LLM / 语音服务配置 + 连接测试
 │   ├── core/
+│   │   ├── runtime.ts           # 全局单例（播放器 / 语音输出 / 会话）
+│   │   ├── settings.ts          # 配置读写（localStorage）
 │   │   ├── audio/
-│   │   │   └── player.ts        # 音频播放 + 振幅提取 + 打断
+│   │   │   ├── player.ts        # 音频播放 + 振幅提取 + 可等待播放
+│   │   │   └── tts.ts           # 语音输出队列（合成并行 / 播放串行）
 │   │   ├── live2d/
 │   │   │   ├── engine.ts        # 渲染引擎适配层（隔离第三方 API）
 │   │   │   ├── cubism.ts        # Cubism Core 运行时加载
@@ -111,8 +116,14 @@ pnpm install
 # 1. 放入 Cubism Core 运行时（必需，见下）
 # 2. 放入一个 Live2D 模型（必需，见下）
 
-pnpm dev
+pnpm dev        # Electron 桌面窗口
+pnpm dev:web    # 纯浏览器调试（不加载 Electron，UI 改动看这个更快）
 ```
+
+> **`pnpm dev` 报 "Electron failed to install correctly"？**
+> `pnpm install` 时 Electron 的二进制需要从 GitHub Releases 单独下载，网络不稳就会失败。
+> 补装：`pnpm rebuild electron`（或 `node node_modules/electron/install.js`）。
+> 在那之前可以先用 `pnpm dev:web` 在浏览器里开发，功能基本一致（只少了窗口透明/置顶/穿透）。
 
 ### 第一步：Cubism Core 运行时（必需）
 
@@ -181,12 +192,17 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 - [x] 音频播放器 + 振幅提取 + 打断
 - [x] 口型驱动（振幅 → 参数）
 - [x] 程序化待机动画
-- [ ] Live2D 模型加载与渲染
-- [ ] 接 LLM（流式输出）
-- [ ] 人设系统提示词
-- [ ] 接 CosyVoice 2 流式 TTS
+- [x] Live2D 渲染链路（引擎注册 + Cubism Core 加载 + 模型自动探测）
+- [x] 接 LLM（SSE 流式输出 + 按标点切句）
+- [x] 人设系统提示词（结构化，与代码解耦）
+- [x] 对话编排（历史裁剪 / 逐句回调 / 打断）
+- [x] 文字对话界面（对话面板 + 设置面板 + 连接测试）
+- [x] 语音输出队列（合成并行、播放串行）
+- [ ] 接 CosyVoice 2 推理服务
 - [ ] VAD 触发 ASR
-- [ ] 打断闭环验证
+- [ ] 打断闭环验证（需要真实音频流）
+
+> 最后三项依赖 `python/` 推理服务，接口约定见 `python/README.md`。
 
 ## 后续阶段
 

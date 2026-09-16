@@ -4,7 +4,7 @@ import { createStage, type Stage } from '@/core/live2d/engine'
 import { resolveModelUrl } from '@/core/live2d/models'
 import { LipSyncDriver } from '@/core/live2d/lipsync'
 import { IdleAnimator } from '@/core/live2d/idle'
-import { AudioPlayer } from '@/core/audio/player'
+import { audioPlayer } from '@/core/runtime'
 
 /**
  * 模型不随仓库分发（受 Live2D 授权条款限制）。
@@ -24,7 +24,7 @@ let rafId = 0
 let lastTs = 0
 let resizeObserver: ResizeObserver | null = null
 
-const player = new AudioPlayer()
+
 
 /**
  * 每帧合成参数。
@@ -39,7 +39,7 @@ function frame(ts: number) {
   lastTs = ts
 
   const idleFrame = idle.update(dt)
-  const mouthOpen = lipsync.update(player.amplitude(), dt)
+  const mouthOpen = lipsync.update(audioPlayer.amplitude(), dt)
 
   stage.model.setParams({
     ...idleFrame,
@@ -52,7 +52,7 @@ function frame(ts: number) {
  * 音高在 150~260Hz 间游走，每 0.28s 一个音节包络。
  */
 function makeTestSpeech(): AudioBuffer {
-  const ctx = player.context
+  const ctx = audioPlayer.context
   const sr = ctx.sampleRate
   const buffer = ctx.createBuffer(1, Math.floor(sr * 3.2), sr)
   const ch = buffer.getChannelData(0)
@@ -68,12 +68,12 @@ function makeTestSpeech(): AudioBuffer {
 }
 
 function testLipSync() {
-  player.playBuffer(makeTestSpeech())
+  audioPlayer.playBuffer(makeTestSpeech())
 }
 
 /** 打断演示：立刻掐断音频，口型同步归零 */
 function testInterrupt() {
-  player.stop()
+  audioPlayer.stop()
   lipsync?.reset()
 }
 
@@ -104,7 +104,7 @@ onMounted(async () => {
 onUnmounted(() => {
   cancelAnimationFrame(rafId)
   resizeObserver?.disconnect()
-  player.dispose()
+  // 不要 dispose 共享的 audioPlayer —— 它是全局单例，关掉会让整个应用失去音频
   stage?.destroy()
   stage = null
 })

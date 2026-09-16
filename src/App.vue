@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import Live2DStage from './components/Live2DStage.vue'
+import ChatPanel from './components/ChatPanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+import { chatSession, voiceOutput } from './core/runtime'
 
 const version = ref('0.1.0')
 const passthrough = ref(false)
 const showBar = ref(true)
+const showChat = ref(false)
+const showSettings = ref(false)
 
 onMounted(async () => {
   if (window.nexus) {
@@ -18,7 +23,29 @@ async function togglePassthrough() {
   await window.nexus?.setInteractive(!passthrough.value)
 }
 
+function toggleChat() {
+  showChat.value = !showChat.value
+  if (showChat.value) showSettings.value = false
+}
+
+function openSettings() {
+  showSettings.value = true
+}
+
+function closeSettings() {
+  showSettings.value = false
+}
+
+/** 隐藏角色时把没说完的话一并掐掉，避免只闻其声不见其人 */
+async function hide() {
+  chatSession.interrupt()
+  voiceOutput.interrupt()
+  await window.nexus?.hide()
+}
+
 async function quit() {
+  chatSession.interrupt()
+  voiceOutput.interrupt()
   await window.nexus?.quit()
 }
 </script>
@@ -30,12 +57,27 @@ async function quit() {
 
     <main class="stage-area">
       <Live2DStage />
+
+      <Transition name="slide">
+        <div v-if="showChat && !passthrough" class="chat-slot">
+          <ChatPanel @close="showChat = false" @settings="openSettings" />
+        </div>
+      </Transition>
+
+      <Transition name="fade">
+        <div v-if="showSettings && !passthrough" class="settings-slot">
+          <SettingsPanel @close="closeSettings" />
+        </div>
+      </Transition>
     </main>
 
     <Transition name="bar">
       <div v-if="showBar && !passthrough" class="control-bar no-drag">
         <span class="version">v{{ version }}</span>
-        <button class="btn" @click="togglePassthrough">点击穿透</button>
+        <button class="btn" :class="{ on: showChat }" @click="toggleChat">对话</button>
+        <button class="btn" :class="{ on: showSettings }" @click="openSettings">设置</button>
+        <button class="btn" @click="togglePassthrough">穿透</button>
+        <button class="btn" @click="hide">隐藏</button>
         <button class="btn danger" @click="quit">退出</button>
       </div>
     </Transition>
@@ -79,6 +121,20 @@ async function quit() {
   position: relative;
 }
 
+.chat-slot {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  height: 56%;
+  min-height: 220px;
+}
+
+.settings-slot {
+  position: absolute;
+  inset: 8px;
+}
+
 .control-bar {
   position: absolute;
   left: 50%;
@@ -86,7 +142,7 @@ async function quit() {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 6px 10px;
   border-radius: 10px;
   background: rgba(24, 24, 28, 0.78);
@@ -98,13 +154,13 @@ async function quit() {
 
 .version {
   color: #8a8a92;
-  padding-right: 4px;
+  padding-right: 2px;
 }
 
 .btn {
   border: none;
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 4px 9px;
   font-size: 12px;
   font-family: inherit;
   color: #d8d8dc;
@@ -115,6 +171,11 @@ async function quit() {
 
 .btn:hover {
   background: rgba(255, 255, 255, 0.16);
+}
+
+.btn.on {
+  background: rgba(90, 120, 200, 0.55);
+  color: #f0f0f4;
 }
 
 .btn.danger:hover {
@@ -145,5 +206,26 @@ async function quit() {
 .bar-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(6px);
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

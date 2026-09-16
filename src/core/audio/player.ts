@@ -10,6 +10,8 @@ export class AudioPlayer {
   private source: AudioBufferSourceNode | null = null
   private buf = new Float32Array(0)
   private playing = false
+  /** playBufferAndWait 的唤醒回调，stop() 时要主动调用 */
+  private pendingEnd: (() => void) | null = null
 
   private ensureContext(): AudioContext {
     if (!this.ctx) {
@@ -54,7 +56,26 @@ export class AudioPlayer {
     this.startSource(buffer)
   }
 
-  private startSource(buffer: AudioBuffer): void {
+  /**
+   * 播放并等待自然结束。
+   *
+   * 流式 TTS 需要这个：一句话播完才能接下一句，
+   * 但合成是并行进行的 —— 播放必须串行、合成必须并行。
+   * 被打断时 Promise 同样 resolve（不是 reject），调用方不必区分。
+   */
+  async playBufferAndWait(buffer: AudioBuffer): Promise<void> {
+    const ctx = this.ensureContext()
+    if (ctx.state === 'suspended') await ctx.resume()
+    return new Promise<void>((resolve) => {
+      this.pendingEnd = resolve
+      this.startSource(buffer, () => {
+        this.pendingEnd = null
+        resolve()
+      })
+    })
+  }
+
+  private startSource(buffer: AudioBuffer, onEnded?: () => void): void {
     this.stop()
 
     const src = this.ctx!.createBufferSource()
@@ -66,6 +87,7 @@ export class AudioPlayer {
         this.source = null
         this.playing = false
       }
+      onEnded?.()
     }
 
     src.start()
@@ -91,6 +113,11 @@ export class AudioPlayer {
       this.source = null
     }
     this.playing = false
+
+    // 唤醒等待中的 playBufferAndWait，避免调用方永久挂起
+    const done = this.pendingEnd
+    this.pendingEnd = null
+    done?.()
   }
 
   /** 当前瞬时振幅，0~1。未播放时恒为 0 */

@@ -25,8 +25,8 @@ export interface SessionOptions {
 }
 
 export class ChatSession {
-  private readonly cfg: LLMConfig
-  private readonly system: string
+  private cfg: LLMConfig
+  private system: string
   private readonly hooks: Pick<SessionOptions, 'onSentence' | 'onDelta'>
   private readonly maxHistory: number
 
@@ -38,6 +38,12 @@ export class ChatSession {
     this.system = buildSystemPrompt(opts.persona ?? DEFAULT_PERSONA)
     this.hooks = { onSentence: opts.onSentence, onDelta: opts.onDelta }
     this.maxHistory = opts.maxHistory ?? 40
+  }
+
+  /** 热更新接口配置与人设（改设置后调用，无需重建实例） */
+  updateConfig(cfg: LLMConfig, persona?: Persona): void {
+    this.cfg = cfg
+    if (persona) this.system = buildSystemPrompt(persona)
   }
 
   /** 是否正在生成 */
