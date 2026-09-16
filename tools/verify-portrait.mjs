@@ -149,6 +149,14 @@ async function main() {
 
   const assets = await snapshot()
   /*
+   * 全程把视线钉在正中（除视线用例自己会改）。
+   *
+   * 为什么：真机上物理鼠标就在窗口里，指针一动瞳孔和整体都会跟着偏 ——
+   * 那些靠截图逐像素比的用例（口型换图、待机漂移）就会被污染，
+   * 表现为"变化像素忽多忽少"，排查起来很费劲。
+   */
+  await evaluate(`(window.__nexusGazeOverride = { x: 0, y: 0 })`)
+  /*
    * 不是立绘模式（比如 ?live2d=1）时，立绘专属的断言跳过 ——
    * 但**待机漂移**这条对两个渲染器都成立，所以照样测（见文件末尾）。
    */
@@ -306,87 +314,58 @@ async function main() {
   const gazeRows = []
   await evaluate(`(window.__nexusRuntime.idleRuntime.factor = 0)`)
   await sleep(300)
-  /*
-   * 测量期间把控制条藏掉。
-   * 它悬浮才浮现，而"鼠标移到脸上面"这个采样点正好落在它身上 ——
-   * 事件就落在按钮上、指针被判为离开角色，读到的 gazeY 永远是 0。
-   * 我们要测的是角色，不是 UI，所以临时隐藏是合理的。
-   */
-  await evaluate(`(() => {
-    const s = document.createElement('style')
-    s.id = '__gaze_test_hide_ui'
-    s.textContent = '.no-drag, .app-bar, .control-bar { display: none !important; }'
-    document.head.appendChild(s)
-    return true
-  })()`)
   const anchor = await evaluate(`window.__nexusStage.stage.anchor('head')`)
-  const moveTo = async (x, y) => {
-    const px = Math.round(x)
-    const py = Math.round(y)
-    // 派两次：第一次事件偶尔会落在刚隐藏的 UI 上，第二次才稳定命中角色（见上面那条注释）
-    for (let i = 0; i < 2; i++) {
-      await cdp.send('Input.dispatchMouseEvent', {
-        type: 'mouseMoved',
-        x: px,
-        y: py,
-        button: 'none',
-        clickCount: 0,
-      })
-      await sleep(80)
-    }
-  }
   /*
-   * 采样点必须**落在窗口里**：第一版用了 ±420 / -260 的偏移，
-   * 结果指针跑到窗口外 → pointerleave → 指针变 null → 读到"鼠标在右却几乎没反应"，
-   * 白排查了一轮。所以按锚点算可用余量，取对称的最大值。
+   * 视线用**覆盖值**驱动，不派鼠标事件。
+   *
+   * 踩过的坑：合成鼠标事件会被真实指针盖掉（窗口里物理鼠标动一下就是一次 pointermove），
+   * 于是读出来的方向跟注入值毫无关系；另外鼠标移到角色上还会浮出控制条，
+   * 污染基于截图的测量。覆盖值让这个用例与鼠标无关，结果才是确定的。
    */
-  const viewport = await evaluate(`({ w: window.innerWidth, h: window.innerHeight })`)
-  const margin = 8
-  const maxX = Math.min(anchor.x - margin, viewport.w - anchor.x - margin)
-  const maxUp = Math.max(0, anchor.y - margin)
   const cases = [
     ['脸原位', 0, 0],
-    ['鼠标左', -maxX, 0],
-    ['鼠标右', maxX, 0],
-    // 上方只留 48px：再往上会被顶部那条 UI 容器吃掉（.stage 不覆盖那里）
-    ['鼠标上', 0, -48],
-    ['鼠标下', 0, 300],
+    ['看左', -1, 0],
+    ['看右', 1, 0],
+    ['看上', 0, 1],
+    ['看下', 0, -1],
   ]
-  console.log(`窗口 ${viewport.w}×${viewport.h}，脸的余量：左右 ±${maxX.toFixed(0)}，上方 ${maxUp.toFixed(0)}`)
-  // 先走到静止位并等稳，再采基线 —— 否则基线本身带着上一次的位移，读出来的 Δ 全是偏的
-  await moveTo(anchor.x, anchor.y)
-  await sleep(900)
-  for (const [label, ox, oy] of cases) {
-    await moveTo(anchor.x + ox, anchor.y + oy)
+  for (const [label, gx, gy] of cases) {
+    await evaluate(`(window.__nexusGazeOverride = { x: ${gx}, y: ${gy} })`)
     await sleep(700) // 平滑时间常数 130ms，700ms 足够收敛
     const row = await evaluate(`(() => {
       const s = window.__nexusStage
       const t = window.__nexusPortrait ? window.__nexusPortrait.transform() : null
+      const shown = window.__nexusPortrait ? JSON.parse(JSON.stringify(window.__nexusPortrait.shown)) : null
       return {
         gaze: s.gaze.value(),
         pointer: s.pointer,
         anchor: s.anchor,
         frame: s.lastFrame ? { x: s.lastFrame.gazeX, y: s.lastFrame.gazeY } : null,
         transform: t,
+        pupil: shown ? { x: shown.pupilX, y: shown.pupilY } : null,
       }
     })()`)
-    gazeRows.push({ label, offset: [ox, oy], ...row })
+    gazeRows.push({ label, target: [gx, gy], ...row })
   }
   console.log(`\n视线跟随（待机已置 0，锚点 ${anchor.x.toFixed(0)},${anchor.y.toFixed(0)}）：`)
-  console.log('  鼠标      应用看到的指针      驱动输出        立绘位移           旋转')
+  console.log('  鼠标      应用看到的指针   驱动输出        瞳孔偏移           整体位移         旋转')
   const base = gazeRows[0]
   for (const r of gazeRows) {
     const dx = r.transform && base.transform ? r.transform.x - base.transform.x : 0
     const dy = r.transform && base.transform ? r.transform.y - base.transform.y : 0
     const rot = r.transform ? `${r.transform.rotationDeg.toFixed(2)}°` : '?'
     const p = r.pointer ? `${r.pointer.x},${r.pointer.y}` : 'null'
+    const pu = r.pupil ? `(${r.pupil.x.toFixed(1)},${r.pupil.y.toFixed(1)})` : '无图层'
     console.log(
-      `  ${r.label}  ${p}`.padEnd(28) +
+      `  ${r.label}  ${p}`.padEnd(26) +
         `(${r.gaze.x.toFixed(2)},${r.gaze.y.toFixed(2)})`.padEnd(16) +
-        `Δ(${dx.toFixed(1)},${dy.toFixed(1)}) px`.padEnd(18) +
+        pu.padEnd(19) +
+        `Δ(${dx.toFixed(1)},${dy.toFixed(1)}) px`.padEnd(17) +
         rot,
     )
   }
+  const hasPupil = Boolean(gazeRows[1].pupil)
+  console.log(`  瞳孔图层：${hasPupil ? '有（眼睛会真的动）' : '没有（只能整体视差）'}`)
   const g = (i) => gazeRows[i].gaze
   const d = (i, axis) => {
     const b = gazeRows[0].transform
@@ -394,23 +373,31 @@ async function main() {
     if (!b || !t) return 0
     return axis === 'x' ? t.x - b.x : t.y - b.y
   }
-  // 顺序：脸原位 / 左 / 右 / 上 / 下
+  // 顺序：脸原位 / 看左 / 看右 / 看上 / 看下
   const checks = [
-    ['鼠标在左 → 往左看（gazeX 明显为负）', g(1).x < -0.6],
-    ['鼠标在右 → 往右看（gazeX 明显为正）', g(2).x > 0.6],
-    ['鼠标在下 → 往下看（gazeY 为负）', g(4).y < -0.4],
-    ['往左看 → 整体左移', d(1, 'x') < -3],
-    ['往右看 → 整体右移', d(2, 'x') > 3],
-    ['往下看 → 整体下移', d(4, 'y') > 1],
+    ['看左 → gazeX 明显为负', g(1).x < -0.6],
+    ['看右 → gazeX 明显为正', g(2).x > 0.6],
+    ['看上 → gazeY 明显为正', g(3).y > 0.6],
+    ['看下 → gazeY 明显为负', g(4).y < -0.6],
+    ['看左 → 整体左移', d(1, 'x') < -3],
+    ['看右 → 整体右移', d(2, 'x') > 3],
+    ['看上 → 整体上移', d(3, 'y') < -1],
+    ['看下 → 整体下移', d(4, 'y') > 1],
     ['驱动输出 = 送进渲染器的值', Math.abs(g(1).x - (gazeRows[1].frame?.x ?? 99)) < 0.02],
-    /*
-     * 「往上看」单独放宽：角色是铺满窗口的，脸固定在 18% 高度处，
-     * 加上顶部那条 UI 容器，鼠标最多只能移到脸上面约 50px ——
-     * 换算出来 gazeY 只有 0.1 左右，而且屏幕位移不到 1px。
-     * 所以只断言"方向是正的"，并把这个限制写出来，不假装它能测满。
-     */
-    [`鼠标在上 → 往上看（受窗口顶部限制，只能到 ${g(3).y.toFixed(2)}）`, g(3).y > 0.08],
   ]
+  // 有瞳孔图层时再加三条：瞳孔方向和幅度要对（它才是"眼睛真的在动"）
+  if (gazeRows[1].pupil) {
+    const pu = (i, axis) => {
+      const b = gazeRows[0].pupil
+      const t = gazeRows[i].pupil
+      return axis === 'x' ? t.x - b.x : t.y - b.y
+    }
+    checks.push(
+      ['瞳孔跟着看左（画布像素，负）', pu(1, 'x') < -4 && Math.abs(pu(1, 'x')) <= 10.5],
+      ['瞳孔跟着看右（画布像素，正）', pu(2, 'x') > 4 && pu(2, 'x') <= 10.5],
+      ['瞳孔跟着看下（屏幕上往下）', pu(4, 'y') > 2 && pu(4, 'y') <= 6],
+    )
+  }
   let allOk = true
   for (const [label, ok] of checks) {
     if (!ok) allOk = false
@@ -419,7 +406,7 @@ async function main() {
   writeFileSync(join(OUT_DIR, 'gaze.json'), JSON.stringify({ anchor, rows: gazeRows }, null, 2))
   await evaluate(
     `(() => {
-      document.getElementById('__gaze_test_hide_ui')?.remove()
+      window.__nexusGazeOverride = null
       window.__nexusStage.gaze.reset()
       window.__nexusRuntime.idleRuntime.factor = 1
       return true

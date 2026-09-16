@@ -47,6 +47,17 @@ const GAZE_SHIFT_RATIO = 0.007
 const GAZE_LIFT_RATIO = 0.003
 const GAZE_ROLL_DEG = 1.6
 
+/**
+ * 瞳孔能移多少（画布像素）。
+ *
+ * 上限不是随便定的：虹膜左右各只有约 14px 眼白、上下约 8px，
+ * 越过就把补出来的眼白推出眼睛轮廓了（会看到一块抹过的痕迹）。
+ * 所以横向 10px、纵向按 0.55 收（5.5px）。
+ * 换算到 420×640 的桌宠窗口是 2.3px / 1.3px —— 小，但和整体视差叠起来就有"她在看"的感觉。
+ */
+const PUPIL_SHIFT_MAX_PX = 10
+const PUPIL_LIFT_RATIO = 0.55
+
 /** 低于这个开口度就是「闭嘴」= 不叠任何差分 */
 const DEFAULT_CLOSED_LEVEL = 0.1
 /** 刚开口时的最小缩放：再小就看不出张开了，只剩一条缝 */
@@ -162,6 +173,13 @@ export async function createPortraitStage(
     root.addChild(jaw)
   }
 
+  /*
+   * 瞳孔图层：画在底图之上、眼差分之下 ——
+   * 这样眨眼时闭眼图会盖住它（顺序反了就会"闭着眼还能看到眼珠"）。
+   */
+  const pupil = assets.pupil ? new Sprite(assets.pupil) : null
+  if (pupil) root.addChild(pupil)
+
   const eyes = assets.eyesOpen ? new Sprite(assets.eyesOpen) : null
   if (eyes) root.addChild(eyes)
 
@@ -270,7 +288,15 @@ export async function createPortraitStage(
   const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 
   /** 当前显示的嘴型索引 / 眼睛状态 —— 换图是离散的，出问题时必须能一眼看出换到了哪张 */
-  const shown = { mouthIndex: -1, mouthScale: 1, eyesOpen: true, jawStretch: 1 }
+  const shown = {
+    mouthIndex: -1,
+    mouthScale: 1,
+    eyesOpen: true,
+    jawStretch: 1,
+    /** 瞳孔相对底图的偏移（画布像素），排查"眼睛没动"时看它 */
+    pupilX: 0,
+    pupilY: 0,
+  }
 
   const applyFrame = (frame: CharacterFrame) => {
     const breath = clamp01(frame.ParamBreath)
@@ -335,10 +361,23 @@ export async function createPortraitStage(
     }
 
     // 眨眼：换图（没有眼差分就什么都不做）
+    const eyeOpen = clamp01((frame.ParamEyeLOpen + frame.ParamEyeROpen) / 2)
     if (eyes && assets.eyesClosed) {
-      const open = (frame.ParamEyeLOpen + frame.ParamEyeROpen) / 2
-      shown.eyesOpen = open >= 0.5
+      shown.eyesOpen = eyeOpen >= 0.5
       eyes.texture = shown.eyesOpen ? assets.eyesOpen! : assets.eyesClosed
+    }
+
+    /*
+     * 瞳孔跟着视线平移。
+     *
+     * ★ 为什么要乘 eyeOpen：闭眼时瞳孔必须回到正中，否则眨眼瞬间会有一小块
+     *   眼珠从闭眼图的边缘露出来（差分只覆盖了原位置的虹膜，移出去的部分盖不住）。
+     *   顺带也更自然 —— 人眨眼时眼球本来就回中位。
+     */
+    if (pupil) {
+      shown.pupilX = gazeX * PUPIL_SHIFT_MAX_PX * eyeOpen
+      shown.pupilY = -gazeY * PUPIL_SHIFT_MAX_PX * PUPIL_LIFT_RATIO * eyeOpen
+      pupil.position.set(shown.pupilX, shown.pupilY)
     }
 
     // 口型
@@ -467,6 +506,7 @@ export async function createPortraitStage(
         counts: {
           mouths: mouthStates.length,
           hasEyes: !!assets.eyesClosed,
+          hasPupil: !!assets.pupil,
           hasHairFront: !!hairFront,
           hasHairBack: !!assets.hairBack,
           /** 闭嘴/睁眼是用「不叠加」补的（底图本身就是那个状态） */

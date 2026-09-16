@@ -285,6 +285,7 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 |---|---|
 | `python/tools/prepare_portrait.py 立绘.png` | 一条命令备好底图：备份原图 → 抠背景 → 报出取景参数 |
 | `python/tools/make_differential.py --base … --variant …` | 拿「AI 改过的整张图」自动做差分图：只取真正改动的像素，框外漂移自动丢弃 |
+| `python/tools/extract_pupils.py` | 抠出瞳孔图层 + 把底图补成眼白（让眼睛能跟着鼠标动），带自检和对比预览图 |
 | `node tools/verify-portrait.mjs` | 自动验证：素材状态、口型换图/对位、待机漂移、**热插拔**（切角色不刷新页面），都靠截图逐像素比 |
 | `node tools/smoke-ui.mjs` | UI 烟测：控制条悬浮浮现 → 打开设置 → 读下拉内容 → 用界面真的切一次角色（走用户路径，能抓到"点开是空的"这类问题） |
 

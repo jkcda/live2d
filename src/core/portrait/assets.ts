@@ -85,6 +85,15 @@ export interface PortraitAssets {
   hairFront?: Texture
   eyesOpen?: Texture
   eyesClosed?: Texture
+  /**
+   * 瞳孔/虹膜图层（可选）。
+   *
+   * 为什么它和"眨眼"是两回事：眨眼的差分是**整只眼睛**换图，而瞳孔图层是
+   * 把虹膜单独抠出来（底图对应位置已经补成眼白），于是它能在眼白范围内小幅平移 ——
+   * 这才是"眼睛真的跟着鼠标动"。
+   * 画法顺序：底图 → 瞳孔 → 眼差分 → 嘴差分，所以眨眼会盖住瞳孔。
+   */
+  pupil?: Texture
   /** 嘴差分，按顺序：闭 → 半开 → 大开。长度可能是 0 */
   mouths: Texture[]
   /**
@@ -391,11 +400,12 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
     motion: raw.motion ?? derived.motion,
   }
 
-  const [hairBack, hairFront, eyesOpen, eyesClosed] = await Promise.all([
+  const [hairBack, hairFront, eyesOpen, eyesClosed, pupil] = await Promise.all([
     loadOptionalTexture(`${base}/hair_back.png`),
     loadOptionalTexture(`${base}/hair_front.png`),
     loadOptionalTexture(`${base}/eyes_open.png`),
     loadOptionalTexture(`${base}/eyes_closed.png`),
+    loadOptionalTexture(`${base}/pupil.png`),
   ])
 
   /*
@@ -455,6 +465,7 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
     hairFront,
     eyesOpen: eyesOpenFinal,
     eyesClosed,
+    pupil,
     mouths,
     mouthPatches,
   }

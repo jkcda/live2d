@@ -133,6 +133,19 @@ function frame(ts: number) {
    * 基准点是**她的脸在屏幕上的位置**，由渲染器给（用窗口中心算会偏，见 types.ts）。
    */
   gaze.aim(pointer, stage.anchor('head'))
+  /*
+   * 开发期：允许外部直接指定这一帧看向哪（`window.__nexusGazeOverride = {x,y}`）。
+   *
+   * 为什么需要：验证脚本没法可靠地"移动鼠标" —— 派进去的合成鼠标事件会被
+   * **真实指针**的事件盖掉（窗口里物理鼠标一动就发 pointermove），
+   * 于是测出来的视线方向跟注入值毫无关系，白排查半天。
+   * 有覆盖值就与指针无关，这个用例才是确定的。
+   */
+  if (import.meta.env.DEV) {
+    const ov = (window as unknown as { __nexusGazeOverride?: { x: number; y: number } | null })
+      .__nexusGazeOverride
+    if (ov) gaze.aimAt(ov.x, ov.y)
+  }
   const g = gaze.update(dt)
 
   const next: CharacterFrame = {

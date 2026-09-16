@@ -35,6 +35,8 @@ export interface PortraitProbe {
   mouths: number
   eyesClosed: boolean
   eyesOpen: boolean
+  /** 有独立瞳孔图层（抠出来的虹膜），有了才能做"眼睛跟着动" */
+  pupil: boolean
   hairFront: boolean
   hairBack: boolean
 }
@@ -128,10 +130,11 @@ async function probeAsset(url: string): Promise<boolean> {
 /** 探测一个立绘素材目录：哪些文件在、有几档嘴型 */
 export async function probePortrait(dir: string): Promise<PortraitProbe> {
   const base = `${assetBase()}${dir.replace(/^\/+|\/+$/g, '')}/`
-  const [body, eyesClosed, eyesOpen, hairFront, hairBack, m0, m1, m2] = await Promise.all([
+  const [body, eyesClosed, eyesOpen, pupil, hairFront, hairBack, m0, m1, m2] = await Promise.all([
     probeAsset(`${base}body.png`),
     probeAsset(`${base}eyes_closed.png`),
     probeAsset(`${base}eyes_open.png`),
+    probeAsset(`${base}pupil.png`),
     probeAsset(`${base}hair_front.png`),
     probeAsset(`${base}hair_back.png`),
     probeAsset(`${base}mouth_0.png`),
@@ -148,7 +151,7 @@ export async function probePortrait(dir: string): Promise<PortraitProbe> {
   if (m0) mouths = m1 ? (m2 ? 3 : 2) : 1
   else if (m1) mouths = m2 ? 2 : 1
 
-  return { body, mouths, eyesClosed, eyesOpen, hairFront, hairBack }
+  return { body, mouths, eyesClosed, eyesOpen, pupil, hairFront, hairBack }
 }
 
 /** 由探测结果推出能力表（配置里写的声明不作数，实测才算） */
@@ -165,7 +168,8 @@ export function featuresOf(pack: CharacterPack, probe?: PortraitProbe): Characte
   }
   return {
     blink: Boolean(probe?.eyesClosed),
-    gaze: false, // 立绘要真·瞳孔跟随，得有独立的眼睛图层（AI 差分可做，尚未做）
+    // 有瞳孔图层才能真正"眼睛跟着动"；否则只能整体视差（见 docs）
+    gaze: Boolean(probe?.pupil),
     mouthArt: probe?.mouths ?? 0,
     hairSway: Boolean(probe?.hairFront || probe?.hairBack),
     motions: false,
