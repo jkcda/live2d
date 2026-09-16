@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { createLive2DCharacter, type Live2DCharacter } from '@/core/character/live2d'
 import { createPortraitStage, type PortraitCharacter } from '@/core/portrait/stage'
-import { expressionLabel } from '@/core/portrait/expressions'
+import { expressionLabel, expressionSpec } from '@/core/portrait/expressions'
 import { poseLabel } from '@/core/portrait/poses'
 import type { CharacterFrame, CharacterStage } from '@/core/character/types'
 import { resolveModelUrl } from '@/core/live2d/models'
@@ -12,7 +12,7 @@ import { IdleAnimator, type IdleFrame } from '@/core/live2d/idle'
 import { GazeDriver } from '@/core/character/gaze'
 import { initCharacter, onCharacterChange, selectCharacter, type PackState } from '@/core/character/selection'
 import { idleRuntime } from '@/core/settings'
-import { audioPlayer } from '@/core/runtime'
+import { audioPlayer, onAgentEvent } from '@/core/runtime'
 
 /**
  * Live2D 模型的路径（模型不随仓库分发，受 Live2D 授权条款限制）。
@@ -71,6 +71,14 @@ const BAR_HIDE_DELAY_MS = 600
  * 嫌太灵敏就调大，嫌她太冷淡就调小。
  */
 const AWAY_BEFORE_GREET_MS = 45_000
+
+/**
+ * agent 让她换的表情挂多久（毫秒）。
+ *
+ * 比手动点的长得多：那一轮回复可能有好几句、还要走 TTS 播出来，
+ * 表情得撑住整段；但也不能永久 —— 见 applyMoodExpression 里的说明。
+ */
+const AGENT_EXPRESSION_HOLD_MS = 8000
 /** 当前渲染器（立绘 / Live2D），显示在状态里便于确认 */
 const kindLabel = ref('')
 /** 当前角色名，显示在测试条上 */
@@ -96,6 +104,31 @@ function toggleExpression(id: string): void {
   const next = activeExpression.value === id ? null : id
   activeExpression.value = next
   portrait.setExpression(next)
+}
+
+/**
+ * agent 让她换表情（对应 agent 服务里的 `show_expression` 工具）。
+ *
+ * ★ 情绪 → 哪张图，是**在应用这边**决定的：
+ *   agent 只知道自己该表现成什么情绪（happy / unhappy / …），
+ *   而"这个角色手上有哪些表情差分"只有应用知道（`expressions.ts` 里声明过）。
+ *   所以模型给情绪、这里挑图 —— 换角色、换素材都不用动 agent 那边。
+ *
+ * 没有对应素材时（比如她现在还没有"开心"这张图）**什么都不做**：
+ * 硬套一张生气或伤心的脸比不变脸更糟。
+ */
+function applyMoodExpression(mood: string | null): void {
+  if (!portrait) return
+  if (!mood) {
+    activeExpression.value = null
+    portrait.setExpression(null)
+    return
+  }
+  const hit = portrait.expressionNames.find((id) => expressionSpec(id)?.mood === mood)
+  if (!hit) return
+  activeExpression.value = hit
+  // 限时：情绪跟着这一轮聊完就该散了（不然她会顶着一张生气的脸过一晚上）
+  portrait.setExpression(hit, AGENT_EXPRESSION_HOLD_MS)
 }
 
 /**
@@ -169,6 +202,8 @@ let packState: PackState | null = null
 let idleFactor = 1
 /** 角色变化订阅的取消函数 */
 let unsubscribePack: (() => void) | null = null
+/** agent 事件订阅的取消函数 */
+let unsubscribeAgent: (() => void) | null = null
 /** 正在切换的角色 id（防重入，见 switchPack） */
 let switching: string | null = null
 /** 切换途中排队的下一个角色 id */
@@ -514,6 +549,19 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityChange)
 
   /*
+   * 订阅 agent 事件：`command` 事件里的 `expression` 就是"她该换表情了"。
+   * 挂在组件上而不是 runtime 里，是因为舞台会随热插拔重建 ——
+   * 订阅跟着组件的生命周期走，销毁时自动摘掉，不会指向已经 destroy 的舞台。
+   */
+  unsubscribeAgent = onAgentEvent((event) => {
+    if (event.type !== 'command') return
+    if (event.name === 'expression') {
+      const mood = (event.args.mood as string | null | undefined) ?? null
+      applyMoodExpression(mood)
+    }
+  })
+
+  /*
    * 开发期：把"假装离开了 N 毫秒"开出来给验证脚本用。
    * 这段逻辑是**真实时间**驱动的（要等 45 秒），脚本没法干等 ——
    * 有这条缝才能测到同一段判断（阈值、以及"回来了要不要打招呼"）。
@@ -575,6 +623,7 @@ function logAbilities(live2d: Live2DCharacter): void {
 
 onUnmounted(() => {
   unsubscribePack?.()
+  unsubscribeAgent?.()
   resizeObserver?.disconnect()
   window.removeEventListener('blur', onAway)
   window.removeEventListener('focus', onBack)

@@ -85,6 +85,39 @@ export function isLLMReady(cfg: LLMConfig): boolean {
   return Boolean(cfg.apiKey.trim() && cfg.baseURL.trim() && cfg.model.trim())
 }
 
+// ---------------------------------------------------------------- agent 服务
+
+/**
+ * agent 服务（工具 / MCP / 记忆）。
+ *
+ * ★ 默认**开着**，理由：服务不在时是**自动**退回直连 LLM 的（见 session.ts），
+ *   代价只是一次本地连接失败。所以默认开着 = "她随时可能多出工具和记忆"，
+ *   而不是"用户得先搞懂有这么个服务"。
+ *
+ * sessionId 现在固定 default：等有了多角色/多会话，它就是分开记记忆的依据。
+ */
+const AGENT_KEY = 'nexus.agent.config'
+
+export interface AgentConfig {
+  url: string
+  enabled: boolean
+  sessionId?: string
+}
+
+export const DEFAULT_AGENT_CONFIG: AgentConfig = {
+  url: 'http://127.0.0.1:8766',
+  enabled: true,
+  sessionId: 'default',
+}
+
+export function loadAgentConfig(): AgentConfig {
+  return readJSON<AgentConfig>(AGENT_KEY, DEFAULT_AGENT_CONFIG)
+}
+
+export function saveAgentConfig(cfg: AgentConfig): void {
+  writeJSON(AGENT_KEY, cfg)
+}
+
 // ---------------------------------------------------------------- 待机动作
 
 /**

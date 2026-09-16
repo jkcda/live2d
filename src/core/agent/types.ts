@@ -17,6 +17,14 @@ export type AgentEvent =
   | { type: 'tool_call'; tool: string; args: Record<string, unknown> }
   /** 工具返回结果 */
   | { type: 'tool_result'; tool: string; result: string }
+  /**
+   * 让界面做一件事（不是文本）。
+   *
+   * 现在只有一条：`expression` —— 她说话时的情绪要**落到脸上**。
+   * 为什么走事件而不是让模型直接调前端函数：模型跑在 agent 服务里，
+   * 它只能通过这条流把意图带回来，由上层决定怎么执行。
+   */
+  | { type: 'command'; name: string; args: Record<string, unknown> }
   /** 本轮结束 */
   | { type: 'done' }
   /** 出错 */

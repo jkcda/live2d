@@ -64,3 +64,7 @@ Thumbs.db
 
 # ── 会话上传的临时文件（用户拖进来的图等）──
 .dsh-uploads/
+
+# ����/���Բ���
+*.wav
+!python/voices/README.md

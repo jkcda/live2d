@@ -203,9 +203,11 @@ export interface PortraitCharacter extends CharacterStage {
   kind: 'portrait'
   /**
    * 切表情。`null` = 素颜。
-   * 手动切的表情**不会自动复原**（用户是特意选的）；点击反应走的是限时那条路。
+   *
+   * @param holdMs > 0 时限时挂一会儿后自动复原（点击反应、以及 agent 让她换表情走这条），
+   *                0 = 一直挂着（用户手动选的）
    */
-  setExpression(id: string | null): void
+  setExpression(id: string | null, holdMs?: number): void
   /** 素材里实际存在的表情 id（= `abilities.expressionNames`） */
   readonly expressionNames: string[]
   /**

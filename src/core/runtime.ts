@@ -8,7 +8,8 @@ import { AudioPlayer } from './audio/player'
 import { VoiceOutput, type TTSConfig } from './audio/tts'
 import { VoiceInput, type StreamEvent, type VoiceInputStatus } from './audio/stream'
 import { ChatSession } from './agent/session'
-import { idleRuntime, loadLLMConfig, loadTTSConfig, saveTTSConfig } from './settings'
+import type { AgentEvent } from './agent/types'
+import { idleRuntime, loadAgentConfig, loadLLMConfig, loadTTSConfig, saveTTSConfig } from './settings'
 
 /** 全应用唯一的音频输出 */
 export const audioPlayer = new AudioPlayer()
@@ -16,10 +17,29 @@ export const audioPlayer = new AudioPlayer()
 /** 语音输出队列（读的是实时配置，改设置后立即生效） */
 export const voiceOutput = new VoiceOutput(audioPlayer, () => loadTTSConfig())
 
-/** 当前对话会话 */
+/**
+ * agent 事件订阅者。
+ *
+ * 为什么要这么一层：`command` 事件（"换个表情"）要落到**舞台**上，
+ * 而舞台活在 Vue 组件里、会随热插拔重建；会话是模块级单例。
+ * 让组件在 mount 时挂上、unmount 时摘掉，比让 runtime 去认识舞台干净得多。
+ */
+type AgentEventHandler = (event: AgentEvent) => void
+const agentHandlers = new Set<AgentEventHandler>()
+
+export function onAgentEvent(handler: AgentEventHandler): () => void {
+  agentHandlers.add(handler)
+  return () => agentHandlers.delete(handler)
+}
+
+/** 当前对话会话（走 agent 服务；服务不在时自动退回直连 LLM） */
 export const chatSession = new ChatSession({
   cfg: loadLLMConfig(),
+  agent: loadAgentConfig(),
   onSentence: (sentence) => voiceOutput.enqueue(sentence),
+  onEvent: (event) => {
+    for (const fn of agentHandlers) fn(event)
+  },
 })
 
 /**

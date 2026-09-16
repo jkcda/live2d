@@ -95,7 +95,12 @@ live2d/
 │   │   ├── ChatPanel.vue        # 对话界面（流式显示 + 打断）
 │   │   └── SettingsPanel.vue    # LLM / 语音服务 / 角色渲染方式
 │   ├── core/
-│   │   ├── character/
+│   │   ├── agent/               # 对话编排（会话 / 人设 / LLM 客户端 / agent 服务客户端）
+│   │   │   ├── session.ts       # 历史 + 切句 + 打断；优先走 agent 服务，不行退回直连
+│   │   │   ├── agentClient.ts   # agent 服务（8766）的 SSE 客户端
+│   │   │   ├── llm.ts           # 直连 OpenAI 兼容接口（降级路径）+ 按标点切句
+│   │   │   └── persona.ts       # 人设提示词
+│   │   ├── character/           # 角色：角色包 / 能力探测 / 两个渲染器的共同接口
 │   │   │   ├── types.ts         # CharacterStage / CharacterFrame：两个渲染器的共同接口
 │   │   │   ├── packs.ts         # 角色包：清单、素材探测、能力表、按角色调参
 │   │   │   ├── selection.ts     # 当前角色 + 订阅（热插拔的触发源）
@@ -308,6 +313,28 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 
 ---
 
+## 快捷方式 / 服务
+
+三个进程，各管一段，都可以单独起停：
+
+| 服务 | 端口 | 跑什么 | 不在时会怎样 |
+|---|---|---|---|
+| 应用（`pnpm dev:web` / Electron） | 5176 | 渲染 + 语音 + 界面 | —— |
+| 推理服务（`python -m service.main`） | 8765 | TTS / ASR / VAD | 静默降级成"只显示文字" |
+| **agent 服务**（`cd agent && pnpm dev`） | 8766 | 工具 / MCP / 记忆 / 历史压缩 | **退回直连 LLM**：还能聊天，但没有工具和记忆 |
+
+```powershell
+# 她的脑子（工具 / MCP / 记忆）
+cd agent
+pnpm install
+pnpm dev
+```
+
+启动后设置面板/控制台可查：`GET http://127.0.0.1:8766/health`（MCP 状态、记忆条数）、
+`GET /memory`（她记得什么）。详见 [`agent/README.md`](agent/README.md)。
+
+---
+
 ## 快捷键
 
 | 快捷键 | 作用 |
@@ -341,6 +368,11 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 - [x] 表情差分（`expr_<id>.png`）：脸常驻、说话时嘴让位给口型，点击按情绪选脸
 - [x] 姿势差分（`pose_<id>.png`）：整身替换 + 交叉淡入淡出；两帧交替 = **真的在挥手**，
       她登场/你切回来（离开超过 45 秒）时招手打招呼
+- [x] **agent 服务**（`agent/`，8766）：LangChain 工具循环 + MCP（Playwright 26 个工具）
+      + 持久记忆（自动提取 + `remember` 工具）+ 渐进式历史压缩
+- [x] agent → 界面的 `command` 通道：她说话时的情绪**真的会落到脸上**（`show_expression`）
+- [x] 在线语音引擎（`edge`，真人级音色、零模型下载）；CosyVoice 2 音色克隆进行中
+- [ ] CosyVoice 2 本地克隆音色（装依赖 + 下权重中）
 
 > **现在就能验证的完整链路**：起 `python -m service.main`（默认 tone 引擎，不需要 GPU 和模型），
 > 再起 `pnpm dev:web`，填个 API key，打开麦克风 —— 说话时她会立刻闭嘴（barge-in），

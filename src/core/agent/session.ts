@@ -10,16 +10,38 @@
  * 不负责：音频播放、Live2D 参数、记忆持久化。那些由上层挂 hook 接。
  */
 import { createSentenceSplitter, streamChat } from './llm'
+import { agentLikelyUp, markAgentDown, streamAgent } from './agentClient'
 import { buildSystemPrompt, DEFAULT_PERSONA, type Persona } from './persona'
 import type { AgentEvent, ChatMessage, LLMConfig } from './types'
+
+/** agent 服务配置（工具 / MCP / 记忆都在这条路上） */
+export interface AgentServiceConfig {
+  /** 服务地址，例如 http://127.0.0.1:8766 */
+  url: string
+  /** 关掉就退回「直连 LLM」的老路（只有聊天，没有工具和记忆） */
+  enabled: boolean
+  /** 分会话存摘要；将来多角色/多会话时区分 */
+  sessionId?: string
+}
 
 export interface SessionOptions {
   cfg: LLMConfig
   persona?: Persona
+  /** agent 服务（不传 = 直连 LLM） */
+  agent?: AgentServiceConfig
   /** 每凑够一句回调一次 —— 接流式 TTS */
   onSentence?: (sentence: string) => void
   /** 每个 token 增量回调 —— 接字幕渲染 */
   onDelta?: (delta: string) => void
+  /**
+   * 每一个事件都回调一次（含 tool_call / tool_result / command）。
+   *
+   * ★ 为什么需要它：`command`（比如"换个表情"）要落到**舞台**上，
+   *   而舞台是另一个 Vue 组件 —— 它不消费这个生成器。
+   *   会话是所有人共用的咽喉（文字输入和语音输入都从这儿走），
+   *   在这儿广播一次，两个入口就都覆盖到了。
+   */
+  onEvent?: (event: AgentEvent) => void
   /** 历史里保留的最大消息条数（不含 system）。默认 40，约 20 轮 */
   maxHistory?: number
 }
@@ -27,7 +49,8 @@ export interface SessionOptions {
 export class ChatSession {
   private cfg: LLMConfig
   private system: string
-  private readonly hooks: Pick<SessionOptions, 'onSentence' | 'onDelta'>
+  private agent: AgentServiceConfig | undefined
+  private readonly hooks: Pick<SessionOptions, 'onSentence' | 'onDelta' | 'onEvent'>
   private readonly maxHistory: number
 
   private history: ChatMessage[] = []
@@ -35,8 +58,9 @@ export class ChatSession {
 
   constructor(opts: SessionOptions) {
     this.cfg = opts.cfg
+    this.agent = opts.agent
     this.system = buildSystemPrompt(opts.persona ?? DEFAULT_PERSONA)
-    this.hooks = { onSentence: opts.onSentence, onDelta: opts.onDelta }
+    this.hooks = { onSentence: opts.onSentence, onDelta: opts.onDelta, onEvent: opts.onEvent }
     this.maxHistory = opts.maxHistory ?? 40
   }
 
@@ -44,6 +68,16 @@ export class ChatSession {
   updateConfig(cfg: LLMConfig, persona?: Persona): void {
     this.cfg = cfg
     if (persona) this.system = buildSystemPrompt(persona)
+  }
+
+  /** 热更新 agent 服务配置（设置里开关一下就该生效，不该要求重启应用） */
+  updateAgent(agent: AgentServiceConfig | undefined): void {
+    this.agent = agent
+  }
+
+  /** 当前是不是走 agent 服务（设置面板显示状态用） */
+  get usingAgent(): boolean {
+    return Boolean(this.agent?.enabled)
   }
 
   /** 是否正在生成 */
@@ -77,7 +111,7 @@ export class ChatSession {
     let errored = false
 
     try {
-      for await (const ev of streamChat(this.messages as ChatMessage[], this.cfg, controller.signal)) {
+      for await (const ev of this.stream(text, controller.signal)) {
         if (ev.type === 'delta') {
           assistant += ev.content
           this.hooks.onDelta?.(ev.content)
@@ -88,6 +122,8 @@ export class ChatSession {
         } else if (ev.type === 'error') {
           errored = true
         }
+        // 广播给"不消费这个生成器"的部分（舞台要执行 command、面板要显示工具）
+        this.hooks.onEvent?.(ev)
         yield ev
       }
 
@@ -113,6 +149,46 @@ export class ChatSession {
         this.history.pop()
       }
     }
+  }
+
+  /**
+   * 挑一条路走：优先 agent 服务，不行就退回直连 LLM。
+   *
+   * ★ 退化必须是**自动**的：agent 服务是独立进程（要跑 pnpm，还要连 MCP），
+   *   没起来是常态。如果这时候她连话都不说了，用户会觉得"这软件坏了"，
+   *   而实际上她只是少了工具 —— 少了工具还能聊天，这才是对的降级。
+   *
+   * 服务刚挂掉那 30 秒内不再重试（见 agentClient 的 markAgentDown）：
+   * 否则每一句话都要先等一次连接超时，那才是真的卡。
+   */
+  private async *stream(text: string, signal: AbortSignal): AsyncGenerator<AgentEvent> {
+    const agentCfg = this.agent
+    if (agentCfg?.enabled && agentLikelyUp()) {
+      try {
+        for await (const ev of streamAgent({
+          url: agentCfg.url,
+          // agent 服务自己拼 system（人设 + 记忆 + 时间），所以历史里不带 system
+          messages: this.history.slice(0, -1),
+          input: text,
+          llm: this.cfg,
+          systemPrompt: this.system,
+          sessionId: agentCfg.sessionId,
+          signal,
+        })) {
+          yield ev
+        }
+        return
+      } catch (err) {
+        if (signal.aborted) return
+        markAgentDown()
+        console.warn(
+          '[session] agent 服务不可用，这一轮退回直连 LLM：',
+          err instanceof Error ? err.message : err,
+        )
+      }
+    }
+
+    yield* streamChat(this.messages as ChatMessage[], this.cfg, signal)
   }
 
   /**
