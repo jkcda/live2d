@@ -294,7 +294,7 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 | `python/tools/prepare_portrait.py 立绘.png` | 一条命令备好底图：备份原图 → 抠背景 → 报出取景参数 |
 | `python/tools/make_differential.py --base … --variant …` | 拿「AI 改过的整张图」自动做差分图：只取真正改动的像素，框外漂移自动丢弃 |
 | `python/tools/extract_pupils.py` | 抠出瞳孔图层 + 把底图补成眼白（让眼睛能跟着鼠标动），带自检和对比预览图 |
-| `python/tools/make_pose.py` | 把「AI 改过的整身图」做成姿态差分（招手之类）：抠底 + **把脸恢复成底图那张**，带自检（脸被改了就直接报错） |
+| `python/tools/make_pose.py` | 把「AI 改过的整身图」做成姿态差分（招手之类）：抠底 + **把脸恢复成底图那张**，带自检（脸被改了就直接报错）；第二帧加 `--head-from 第一帧` 保证两帧的头连发丝边都一致 |
 | `node tools/verify-portrait.mjs` | 自动验证：素材状态、口型换图/对位、**表情图层与说话时的遮嘴**、点击反应的选脸规则、待机漂移、**热插拔**（切角色不刷新页面） |
 | `node tools/smoke-ui.mjs` | UI 烟测：控制条悬浮浮现 → 打开设置 → 读下拉内容 → 用界面真的切一次角色（走用户路径，能抓到"点开是空的"这类问题） |
 
@@ -339,7 +339,8 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 - [x] 角色包 + 热插拔（多角色并存，切换角色不刷新页面）
 - [x] 立绘（PNGTuber）渲染器：只有立绘也能用自己的角色（嘴 1~2 档 + 眨眼 + 瞳仁跟随）
 - [x] 表情差分（`expr_<id>.png`）：脸常驻、说话时嘴让位给口型，点击按情绪选脸
-- [x] 姿势差分（`pose_<id>.png`）：整身替换 + 交叉淡入淡出，她登场/你切回来时招手打招呼
+- [x] 姿势差分（`pose_<id>.png`）：整身替换 + 交叉淡入淡出；两帧交替 = **真的在挥手**，
+      她登场/你切回来（离开超过 45 秒）时招手打招呼
 
 > **现在就能验证的完整链路**：起 `python -m service.main`（默认 tone 引擎，不需要 GPU 和模型），
 > 再起 `pnpm dev:web`，填个 API key，打开麦克风 —— 说话时她会立刻闭嘴（barge-in），

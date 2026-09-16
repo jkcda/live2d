@@ -76,6 +76,13 @@ def main() -> None:
     )
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL, help="isnetis.onnx 路径")
     parser.add_argument(
+        "--head-from",
+        type=Path,
+        default=None,
+        help="头部区域直接取自这一张（通常是同一姿势的第一帧）—— "
+        "保证两帧的头**连发丝边都逐像素相同**，挥手时不会在头发边缘闪",
+    )
+    parser.add_argument(
         "--no-restore-face",
         action="store_true",
         help="不做脸部还原（只想看看「直接整身换」是什么样时用）",
@@ -112,6 +119,18 @@ def main() -> None:
         changed_before = int(((diff > 0) & restore).sum())
         pose[restore] = base[restore].astype(np.uint8)
 
+    # 2b) 头部区域整体取自另一帧（第二帧用它，见 --head-from 的说明）
+    head_from = None
+    if args.head_from:
+        head_from = np.array(Image.open(args.head_from).convert("RGBA"))
+        if head_from.shape != pose.shape:
+            raise SystemExit(
+                f"--head-from 的尺寸和底图不一致：{head_from.shape[1]}×{head_from.shape[0]}"
+            )
+        # 连 alpha 一起复制：只复制颜色的话，"AI 把发丝画宽了一点"那部分还会留在原地，
+        # 两帧交替时头发边缘就会闪（实测差 896 个像素，正好都在这个框里）
+        pose[box] = head_from[box]
+
     # 3) 自检
     diff = np.abs(pose[..., :3].astype(np.int16) - base[..., :3]).max(axis=2)
     head_changed = int(((diff > 0) & restore).sum())
@@ -131,6 +150,14 @@ def main() -> None:
     print(f"  · 身体部分明显变化（>30）：{body_changed} px  ← 这就是姿态本身；太小说明图没改对")
     print(f"  · 头部框内新出现的像素：{new_px}（AI 把发丝画宽了一点，可忽略）")
     print(f"  · 消失的像素：{gone_px}（原来垂着的手臂，正是要它消失的）")
+    if head_from is not None:
+        hd = np.abs(pose[box][:, :3].astype(np.int16) - head_from[box][:, :3].astype(np.int16))
+        ha = np.abs(pose[box][:, 3].astype(np.int16) - head_from[box][:, 3].astype(np.int16))
+        head_same = int(((hd.max(axis=1) > 0) | (ha > 0)).sum())
+        print(
+            f"  · 与 --head-from（{args.head_from.name}）在头部框内的差异：{head_same}  ← 必须是 0，"
+            "两帧的头一致才不会被看出在换图"
+        )
     print(f"\n输出：{args.out}")
 
     if head_changed:
