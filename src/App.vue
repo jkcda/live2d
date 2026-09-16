@@ -72,7 +72,11 @@ async function quit() {
     </main>
 
     <Transition name="bar">
-      <div v-if="showBar && !passthrough" class="control-bar no-drag">
+      <div
+        v-if="showBar && !passthrough && !showSettings"
+        class="control-bar no-drag"
+        :class="{ 'above-chat': showChat }"
+      >
         <span class="version">v{{ version }}</span>
         <button class="btn" :class="{ on: showChat }" @click="toggleChat">对话</button>
         <button class="btn" :class="{ on: showSettings }" @click="openSettings">设置</button>
@@ -150,6 +154,15 @@ async function quit() {
   border: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 12px;
   white-space: nowrap;
+}
+
+/*
+ * 对话面板打开时把控制条抬到它上方。
+ * 不抬的话两者都贴底（面板 8px、控制条 12px），控制条会压住输入框。
+ * max() 是为了照顾面板的 min-height —— 窗口矮的时候 56% 会小于 220px。
+ */
+.control-bar.above-chat {
+  bottom: calc(max(56%, 220px) + 28px);
 }
 
 .version {
