@@ -138,6 +138,9 @@ pnpm dev        # Electron 桌面窗口
 pnpm dev:web    # 纯浏览器调试（不加载 Electron，UI 改动看这个更快）
 ```
 
+> **浏览器里访问 `http://localhost:5176`** —— 不是 Vite 默认的 5173。
+> 端口在 `vite.config.ts` 的 `server.port` 里，刻意避开默认值以免和别的项目撞。
+
 > **`pnpm dev` 报 "Electron failed to install correctly"？**
 > `pnpm install` 时 Electron 的二进制需要从 GitHub Releases 单独下载，网络不稳就会失败。
 > 补装：`pnpm rebuild electron`（或 `node node_modules/electron/install.js`）。
