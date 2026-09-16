@@ -67,16 +67,25 @@ export class AudioPlayer {
     const ctx = this.ensureContext()
     if (ctx.state === 'suspended') await ctx.resume()
     return new Promise<void>((resolve) => {
-      this.pendingEnd = resolve
       this.startSource(buffer, () => {
-        this.pendingEnd = null
+        if (this.pendingEnd === resolve) this.pendingEnd = null
         resolve()
       })
+      // ★ 必须等 startSource 抢断完上一段之后再登记自己。
+      //   顺序反了的话，startSource 内部的抢断会把刚登记的自己当场唤醒 ——
+      //   playBufferAndWait 实际等待 0ms，一句还没播完就被下一句抢断，
+      //   听起来就是「吞字、断续」。
+      this.pendingEnd = resolve
     })
   }
 
   private startSource(buffer: AudioBuffer, onEnded?: () => void): void {
-    this.stop()
+    // 抢断正在播的那一段：它的等待者代表「被打断的播放」，应该被唤醒。
+    // 但绝不能碰即将登记的新等待者 —— 所以先把旧的取走、清空。
+    const preempted = this.pendingEnd
+    this.pendingEnd = null
+    this.stopSource()
+    preempted?.()
 
     const src = this.ctx!.createBufferSource()
     src.buffer = buffer
@@ -97,6 +106,16 @@ export class AudioPlayer {
 
   /** 立即掐断播放 —— 用户插话（barge-in）时调用 */
   stop(): void {
+    this.stopSource()
+
+    // 唤醒等待中的 playBufferAndWait，避免调用方永久挂起
+    const done = this.pendingEnd
+    this.pendingEnd = null
+    done?.()
+  }
+
+  /** 只停声音，不碰等待者 */
+  private stopSource(): void {
     const src = this.source
     if (src) {
       src.onended = null
@@ -113,11 +132,6 @@ export class AudioPlayer {
       this.source = null
     }
     this.playing = false
-
-    // 唤醒等待中的 playBufferAndWait，避免调用方永久挂起
-    const done = this.pendingEnd
-    this.pendingEnd = null
-    done?.()
   }
 
   /** 当前瞬时振幅，0~1。未播放时恒为 0 */
