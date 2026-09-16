@@ -28,6 +28,45 @@ const ANGLE_X_RANGE = 4
 const ANGLE_Z_RANGE = 1.4
 const BODY_ANGLE_RANGE = 2
 
+/** 低于这个开口度就是「闭嘴」= 不叠任何差分 */
+const CLOSED_LEVEL = 0.1
+/** 刚开口时的最小缩放：再小就看不出张开了，只剩一条缝 */
+const MIN_OPEN_SCALE = 0.35
+
+/**
+ * 开口度 → (用第几张差分, 纵向缩放)。
+ *
+ * 为什么需要这么个映射：立绘只有「离散热差分」，而**说话时振幅几乎不会掉到闭嘴阈值以下**
+ * ——直接按阈值二选一的话，看起来就是全程张嘴（这是实际踩过的坑）。
+ * 所以中间那些开口度靠**纵向缩放**凑：
+ *
+ *   1. 先算一个连续的开度 openness（0.35~1，低开度用幂函数抬一抬，
+ *      因为小振幅在听觉上也是"在说话"，嘴不能只开一条缝）；
+ *   2. 有多少张差分就有几档，取「第一档标称开度 ≥ openness」的那张；
+ *   3. 缩放 = openness / 该档标称开度 —— 于是换图那一刻两张的**视觉大小是连着的**，
+ *      不会出现「突然大一圈」的跳变。
+ *
+ * 只有一张差分时（最常见）：永远用它，缩放直接就是 openness。
+ */
+export function mouthLevel(m: number, tiers: number): { index: number; scale: number } {
+  if (tiers <= 1) return { index: Math.max(0, tiers - 1), scale: 1 }
+  const art = tiers - 1 // 真·差分张数（索引 0 是「闭嘴」= 空纹理）
+  if (m < CLOSED_LEVEL) return { index: 0, scale: 1 }
+
+  const t = Math.min(1, Math.max(0, (m - CLOSED_LEVEL) / (1 - CLOSED_LEVEL)))
+  const openness = MIN_OPEN_SCALE + (1 - MIN_OPEN_SCALE) * Math.pow(t, 0.7)
+
+  let index = art
+  for (let k = 1; k <= art; k++) {
+    if (openness <= k / art + 1e-6) {
+      index = k
+      break
+    }
+  }
+  const nominal = index / art
+  return { index, scale: Math.min(1, Math.max(MIN_OPEN_SCALE, openness / nominal)) }
+}
+
 export interface PortraitStageOptions {
   /** 素材目录，默认 `portrait` */
   baseUrl?: string
@@ -65,6 +104,8 @@ export async function createPortraitStage(
    */
   const mouthStates = assets.mouths
   const hasMouthArt = mouthStates.length > 0
+  /** 嘴的缩放支点（上唇线中点，像素坐标）。量不到就是 null，退化成不缩放 */
+  let mouthPivot: { x: number; y: number } | null = null
   const jawLineRatio = manifest.jawLine ?? 0.5
 
   let jaw: Container | null = null
@@ -85,7 +126,21 @@ export async function createPortraitStage(
   if (eyes) root.addChild(eyes)
 
   const mouth = hasMouthArt ? new Sprite(mouthStates[0]) : null
-  if (mouth) root.addChild(mouth)
+  if (mouth) {
+    /*
+     * ★ 支点设成「上唇线的中点」。
+     *   立绘只有一张嘴差分时，中间那些开口度是靠纵向缩放凑出来的
+     *   （见 applyFrame 里的 tierScale）—— 缩放绕上唇线做，嘴才像下巴往下张，
+     *   绕图心做会变成「嘴整体变大」，绕画布原点做会整张脸乱飘。
+     */
+    const patch = assets.mouthPatches.find((p) => p)
+    mouthPivot = patch ? { x: patch.x + patch.width / 2, y: patch.y } : null
+    if (mouthPivot) {
+      mouth.pivot.set(mouthPivot.x, mouthPivot.y)
+      mouth.position.set(mouthPivot.x, mouthPivot.y)
+    }
+    root.addChild(mouth)
+  }
 
   const hairFront = assets.hairFront ? new Sprite(assets.hairFront) : null
   if (hairFront) root.addChild(hairFront)
@@ -133,7 +188,7 @@ export async function createPortraitStage(
   const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 
   /** 当前显示的嘴型索引 / 眼睛状态 —— 换图是离散的，出问题时必须能一眼看出换到了哪张 */
-  const shown = { mouthIndex: -1, eyesOpen: true, jawStretch: 1 }
+  const shown = { mouthIndex: -1, mouthScale: 1, eyesOpen: true, jawStretch: 1 }
 
   const applyFrame = (frame: CharacterFrame) => {
     const breath = clamp01(frame.ParamBreath)
@@ -188,10 +243,18 @@ export async function createPortraitStage(
     // 口型
     const m = clamp01(frame.mouth)
     if (mouth && mouthStates.length) {
-      // 离散换图：0 闭 / 1 半开 / 2 以上大开
-      const idx = m < 0.12 ? 0 : m < 0.55 ? Math.min(1, mouthStates.length - 1) : mouthStates.length - 1
-      shown.mouthIndex = idx
-      mouth.texture = mouthStates[idx]
+      const pick = mouthLevel(m, mouthStates.length)
+      shown.mouthIndex = pick.index
+      shown.mouthScale = pick.scale
+      mouth.texture = mouthStates[pick.index]
+      /*
+       * 纵向缩放做出中间档。
+       * 只有一张嘴差分时（最常见的情况），要是不缩放，口型就只剩「闭 / 全开」两态，
+       * 而说话时振幅几乎一直在阈值以上 —— 看起来就是**全程张嘴**。
+       * 横向也收一点点，不然压扁后像一条香肠。
+       */
+      const s = pick.scale
+      mouth.scale.set(0.92 + 0.08 * s, s)
     } else if (jaw) {
       // 没嘴差分：拉伸下半张脸代替张嘴（幅度刻意克制，不然会像橡皮）
       shown.jawStretch = 1 + m * 0.05

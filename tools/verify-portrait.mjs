@@ -215,6 +215,23 @@ async function main() {
   const eyesClosed = await shoot('eyes-closed')
   console.log(`闭眼   → ${JSON.stringify((await snapshot())?.shown ?? null)}`)
 
+  /*
+   * 口型渐变：从「闭嘴」到「全开」取几个点各截一张。
+   * 为什么必须测这个：立绘只有离散热差分，中间开口度是靠纵向缩放凑的 ——
+   * 一旦映射写错，表现就是「说话时只有闭/全开两态」，看着像全程张嘴。
+   * 验收标准：mouthScale 单调递增，且变化像素数也单调递增。
+   */
+  await freezeIdle(true)
+  const ramp = []
+  for (const m of [0, 0.15, 0.35, 0.6, 1.0]) {
+    await setMouth(m)
+    const shot = await shoot(`mouth-ramp-${String(m).replace('.', '_')}`)
+    const st = (await snapshot())?.shown
+    ramp.push({ mouthParam: m, shown: st, shot })
+    console.log(`开口度 ${m.toFixed(2)} → 差分#${st.mouthIndex} 纵向缩放 ${st.mouthScale.toFixed(3)}`)
+  }
+  writeFileSync(join(OUT_DIR, 'ramp.json'), JSON.stringify(ramp, null, 2))
+
   shots.mouthClosed = closed.path
   shots.mouth1 = half.path
   shots.mouth2 = wide.path

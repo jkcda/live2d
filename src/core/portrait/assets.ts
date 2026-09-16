@@ -73,6 +73,14 @@ export interface PortraitAssets {
   eyesClosed?: Texture
   /** 嘴差分，按顺序：闭 → 半开 → 大开。长度可能是 0 */
   mouths: Texture[]
+  /**
+   * 每张嘴差分「实际有内容的那一小块」在画布里的位置（**像素**，不是比例）。
+   *
+   * 为什么要量它：只有一张差分时要靠**纵向缩放**做出「微张 ~ 全开」的连续过渡，
+   * 而缩放必须绕「上唇线」这个支点，否则嘴会整体上下漂。
+   * 支点没法写死 —— 每个人嘴的位置都不一样 —— 所以就地问 alpha 包围盒。
+   */
+  mouthPatches: (PortraitRegion | undefined)[]
 }
 
 async function loadOptionalTexture(url: string): Promise<Texture | undefined> {
@@ -247,6 +255,59 @@ async function deriveManifest(
   }
 }
 
+/**
+ * 量一张差分图里「真正有内容的那块」的像素包围盒（用来当缩放支点）。
+ *
+ * 为什么按 800 宽降采样：嘴在 1600×2848 的立绘里只有五十来像素宽，
+ * 按 256 宽量会粗到 ±6px（嘴总共才 24px 高，误差 25% 就白量了）；
+ * 800 宽的误差约 ±2px，够用，而且比全分辨率扫描快四倍。
+ */
+async function measurePatchBox(url: string, targetWidth = 800): Promise<PortraitRegion | undefined> {
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    if (!img.naturalWidth) return undefined
+
+    const scale = Math.min(1, targetWidth / img.naturalWidth)
+    const w = Math.max(1, Math.round(img.naturalWidth * scale))
+    const h = Math.max(1, Math.round(img.naturalHeight * scale))
+    const cv = document.createElement('canvas')
+    cv.width = w
+    cv.height = h
+    const ctx = cv.getContext('2d')
+    if (!ctx) return undefined
+    ctx.drawImage(img, 0, 0, w, h)
+    const data = ctx.getImageData(0, 0, w, h).data
+
+    let minX = w
+    let minY = h
+    let maxX = -1
+    let maxY = -1
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // 阈值给高一点：羽化出来的那些 alpha<24 的边不算内容
+        if (data[(y * w + x) * 4 + 3] > 24) {
+          if (x < minX) minX = x
+          if (x > maxX) maxX = x
+          if (y < minY) minY = y
+          if (y > maxY) maxY = y
+        }
+      }
+    }
+    if (maxX < 0) return undefined
+
+    return {
+      x: minX / scale,
+      y: minY / scale,
+      width: (maxX - minX + 1) / scale,
+      height: (maxY - minY + 1) / scale,
+    }
+  } catch {
+    return undefined
+  }
+}
+
 const trim = (s: string) => s.replace(/\/+$/, '')
 
 /**
@@ -323,19 +384,23 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
    *   所以只要做了「半开」「大开」两张，口型就能工作。
    */
   const mouths: Texture[] = []
+  const mouthPatches: (PortraitRegion | undefined)[] = []
   let derivedClosedMouth = false
   for (let i = 0; i < 8; i++) {
-    const t = await loadOptionalTexture(`${base}/mouth_${i}.png`)
+    const url = `${base}/mouth_${i}.png`
+    const t = await loadOptionalTexture(url)
     if (!t) {
       if (i === 0 && (await loadOptionalTexture(`${base}/mouth_1.png`))) {
         // 有半开/大开但没做闭嘴 → 闭嘴用空纹理
         mouths.push(Texture.EMPTY)
+        mouthPatches.push(undefined)
         derivedClosedMouth = true
         continue
       }
       break
     }
     mouths.push(t)
+    mouthPatches.push(await measurePatchBox(url))
   }
 
   /*
@@ -369,6 +434,7 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
     eyesOpen: eyesOpenFinal,
     eyesClosed,
     mouths,
+    mouthPatches,
   }
 }
 

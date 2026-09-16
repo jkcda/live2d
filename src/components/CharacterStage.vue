@@ -133,20 +133,40 @@ function onPointerDown(e: PointerEvent) {
 
 /**
  * 合成一段带说话节奏的测试音，用来在接 TTS 之前验证口型链路。
- * 音高在 150~260Hz 间游走，每 0.28s 一个音节包络。
+ *
+ * ★ 关键是要有**真正的静音段**。
+ *   第一版是连续音（每 0.28s 一个包络、峰谷之间不断开），结果振幅永远在闭嘴阈值以上，
+ *   看起来就是「全程张嘴、根本不会闭」—— 那不是口型坏了，是这段测试音测不出来。
+ *   所以现在按「音节 + 停顿」来：0.22s 出声、0.13s 静音，每 4 个音节后停长一点。
+ *   静音够长（> 口型的 releaseMs）嘴才闭得下来。
  */
 function makeTestSpeech(): AudioBuffer {
   const ctx = audioPlayer.context
   const sr = ctx.sampleRate
-  const buffer = ctx.createBuffer(1, Math.floor(sr * 3.2), sr)
+  const buffer = ctx.createBuffer(1, Math.floor(sr * 3.4), sr)
   const ch = buffer.getChannelData(0)
 
-  for (let i = 0; i < ch.length; i++) {
-    const t = i / sr
-    const phase = (t % 0.28) / 0.28
-    const env = Math.pow(Math.sin(Math.PI * phase), 1.6)
-    const f0 = 190 + Math.sin(t * 2.1) * 55 + Math.sin(t * 5.7) * 20
-    ch[i] = Math.sin(2 * Math.PI * f0 * t) * env * 0.32
+  const BURST = 0.22
+  const GAP = 0.13
+  const PHRASE_GAP = 0.4
+
+  let t = 0
+  let syllable = 0
+  while (t < 3.4) {
+    const dur = BURST
+    const start = Math.floor(t * sr)
+    const end = Math.min(ch.length, Math.floor((t + dur) * sr))
+    for (let i = start; i < end; i++) {
+      const local = (i - start) / sr
+      const p = local / dur
+      // 起音快、收音更快，模拟音节的爆开与收住
+      const env = Math.min(1, p / 0.12) * Math.pow(1 - p, 0.8)
+      const f0 = 175 + Math.sin(syllable * 1.7) * 45 + Math.sin((i / sr) * 6.1) * 14
+      ch[i] = Math.sin(2 * Math.PI * f0 * (i / sr)) * env * 0.34
+    }
+    syllable++
+    // 每 4 个音节来一次长停顿，让人看清「说完了嘴闭上」
+    t += dur + (syllable % 4 === 0 ? PHRASE_GAP : GAP)
   }
   return buffer
 }
