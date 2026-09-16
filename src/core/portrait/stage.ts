@@ -104,8 +104,6 @@ export async function createPortraitStage(
    */
   const mouthStates = assets.mouths
   const hasMouthArt = mouthStates.length > 0
-  /** 嘴的缩放支点（上唇线中点，像素坐标）。量不到就是 null，退化成不缩放 */
-  let mouthPivot: { x: number; y: number } | null = null
   const jawLineRatio = manifest.jawLine ?? 0.5
 
   let jaw: Container | null = null
@@ -128,16 +126,18 @@ export async function createPortraitStage(
   const mouth = hasMouthArt ? new Sprite(mouthStates[0]) : null
   if (mouth) {
     /*
-     * ★ 支点设成「上唇线的中点」。
-     *   立绘只有一张嘴差分时，中间那些开口度是靠纵向缩放凑出来的
-     *   （见 applyFrame 里的 tierScale）—— 缩放绕上唇线做，嘴才像下巴往下张，
-     *   绕图心做会变成「嘴整体变大」，绕画布原点做会整张脸乱飘。
+     * ★ 支点 = 差分内容的 alpha 质心（大致就是嘴的中线）。
+     *
+     * 立绘只有一张嘴差分时，中间的开口度靠纵向缩放凑出来（见 applyFrame 里的 mouthScale）。
+     * 而差分是**叠在底图上**的 —— 底图那张闭嘴脸一直在下面，
+     * 支点选错就会露馅：一开始我按「区间上边缘」当支点，一压扁整块往上缩，
+     * 底图那条闭嘴线就从下面露出来，看起来像「底图的闭嘴一直在」。
+     * 绕质心缩放则两头都稳：嘴不跑位，闭嘴线一直被盖住。
      */
     const patch = assets.mouthPatches.find((p) => p)
-    mouthPivot = patch ? { x: patch.x + patch.width / 2, y: patch.y } : null
-    if (mouthPivot) {
-      mouth.pivot.set(mouthPivot.x, mouthPivot.y)
-      mouth.position.set(mouthPivot.x, mouthPivot.y)
+    if (patch) {
+      mouth.pivot.set(patch.anchorX, patch.anchorY)
+      mouth.position.set(patch.anchorX, patch.anchorY)
     }
     root.addChild(mouth)
   }
@@ -251,10 +251,9 @@ export async function createPortraitStage(
        * 纵向缩放做出中间档。
        * 只有一张嘴差分时（最常见的情况），要是不缩放，口型就只剩「闭 / 全开」两态，
        * 而说话时振幅几乎一直在阈值以上 —— 看起来就是**全程张嘴**。
-       * 横向也收一点点，不然压扁后像一条香肠。
+       * 横向**不缩放**：嘴的宽度收窄会让底图那条闭嘴线的两端露出来。
        */
-      const s = pick.scale
-      mouth.scale.set(0.92 + 0.08 * s, s)
+      mouth.scale.set(1, pick.scale)
     } else if (jaw) {
       // 没嘴差分：拉伸下半张脸代替张嘴（幅度刻意克制，不然会像橡皮）
       shown.jawStretch = 1 + m * 0.05

@@ -28,6 +28,20 @@ export interface PortraitRegion {
   height: number
 }
 
+/**
+ * 一张差分图里「真正有内容的那块」（**像素**坐标，不是比例）。
+ *
+ * `anchorX/anchorY` 是这块内容的 alpha 质心，用来当缩放支点：
+ * 差分是**叠在底图上**的，压扁它的时候支点选错就会露馅 ——
+ * 支点取在区间上边缘时，一压扁整块往上缩，底图那条闭嘴线就从下面露出来了
+ * （表现就是「底图的闭嘴一直在」）。质心大致落在嘴的中线上，绕它缩放两件事同时成立：
+ * 嘴不会跑位，底图的闭嘴线也一直被盖住。
+ */
+export interface PortraitPatch extends PortraitRegion {
+  anchorX: number
+  anchorY: number
+}
+
 export interface PortraitManifest {
   name?: string
   note?: string
@@ -77,10 +91,10 @@ export interface PortraitAssets {
    * 每张嘴差分「实际有内容的那一小块」在画布里的位置（**像素**，不是比例）。
    *
    * 为什么要量它：只有一张差分时要靠**纵向缩放**做出「微张 ~ 全开」的连续过渡，
-   * 而缩放必须绕「上唇线」这个支点，否则嘴会整体上下漂。
-   * 支点没法写死 —— 每个人嘴的位置都不一样 —— 所以就地问 alpha 包围盒。
+   * 而缩放支点必须是嘴的中线 —— 支点写死不行（每个人嘴的位置都不一样），
+   * 支点取错更不行（会露出底图的闭嘴线），所以就地问 alpha 质心。
    */
-  mouthPatches: (PortraitRegion | undefined)[]
+  mouthPatches: (PortraitPatch | undefined)[]
 }
 
 async function loadOptionalTexture(url: string): Promise<Texture | undefined> {
@@ -256,13 +270,13 @@ async function deriveManifest(
 }
 
 /**
- * 量一张差分图里「真正有内容的那块」的像素包围盒（用来当缩放支点）。
+ * 量一张差分图里「真正有内容的那块」：像素包围盒 + alpha 质心（当缩放支点）。
  *
  * 为什么按 800 宽降采样：嘴在 1600×2848 的立绘里只有五十来像素宽，
  * 按 256 宽量会粗到 ±6px（嘴总共才 24px 高，误差 25% 就白量了）；
  * 800 宽的误差约 ±2px，够用，而且比全分辨率扫描快四倍。
  */
-async function measurePatchBox(url: string, targetWidth = 800): Promise<PortraitRegion | undefined> {
+async function measurePatchBox(url: string, targetWidth = 800): Promise<PortraitPatch | undefined> {
   try {
     const img = new Image()
     img.src = url
@@ -284,24 +298,32 @@ async function measurePatchBox(url: string, targetWidth = 800): Promise<Portrait
     let minY = h
     let maxX = -1
     let maxY = -1
+    let sum = 0
+    let sumX = 0
+    let sumY = 0
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         // 阈值给高一点：羽化出来的那些 alpha<24 的边不算内容
-        if (data[(y * w + x) * 4 + 3] > 24) {
-          if (x < minX) minX = x
-          if (x > maxX) maxX = x
-          if (y < minY) minY = y
-          if (y > maxY) maxY = y
-        }
+        const a = data[(y * w + x) * 4 + 3]
+        if (a <= 24) continue
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+        sum += a
+        sumX += a * x
+        sumY += a * y
       }
     }
-    if (maxX < 0) return undefined
+    if (maxX < 0 || sum === 0) return undefined
 
     return {
       x: minX / scale,
       y: minY / scale,
       width: (maxX - minX + 1) / scale,
       height: (maxY - minY + 1) / scale,
+      anchorX: sumX / sum / scale,
+      anchorY: sumY / sum / scale,
     }
   } catch {
     return undefined
@@ -384,7 +406,7 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
    *   所以只要做了「半开」「大开」两张，口型就能工作。
    */
   const mouths: Texture[] = []
-  const mouthPatches: (PortraitRegion | undefined)[] = []
+  const mouthPatches: (PortraitPatch | undefined)[] = []
   let derivedClosedMouth = false
   for (let i = 0; i < 8; i++) {
     const url = `${base}/mouth_${i}.png`
