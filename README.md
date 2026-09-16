@@ -102,7 +102,15 @@ live2d/
 ├── public/
 │   ├── lib/                     # Cubism Core 运行时（不入库）
 │   └── models/                  # Live2D 模型（不入库，见下）
-├── python/                      # 推理服务（待建）
+├── python/                      # 推理服务（TTS 已实现，ASR/VAD 待建）
+│   ├── service/
+│   │   ├── main.py              # FastAPI 路由
+│   │   ├── audio.py             # WAV 编解码
+│   │   └── tts/
+│   │       ├── base.py          # 引擎接口
+│   │       ├── tone.py          # 内置合成音（零依赖，开发用）
+│   │       └── cosyvoice.py     # CosyVoice 2（懒加载 + 音色克隆）
+│   └── voices/                  # 克隆音色的参考音频（不入库）
 └── docs/
 ```
 
@@ -198,11 +206,13 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 - [x] 对话编排（历史裁剪 / 逐句回调 / 打断）
 - [x] 文字对话界面（对话面板 + 设置面板 + 连接测试）
 - [x] 语音输出队列（合成并行、播放串行）
-- [ ] 接 CosyVoice 2 推理服务
-- [ ] VAD 触发 ASR
+- [x] Python 推理服务（`/health` `/voices` `/tts`，含零依赖的 tone 引擎）
+- [ ] 切到 CosyVoice 2 真实 TTS
+- [ ] VAD 触发 ASR（`WS /stream` 通道）
 - [ ] 打断闭环验证（需要真实音频流）
 
-> 最后三项依赖 `python/` 推理服务，接口约定见 `python/README.md`。
+> 想先验证链路：`cd python && python -m service.main`，引擎用默认的 `tone`，
+> 不需要 GPU 也不需要下载模型，口型就会跟着说话节奏动起来。
 
 ## 后续阶段
 

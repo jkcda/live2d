@@ -22,6 +22,15 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
+# 模型权重（几个 G，自己下）
+python/pretrained_models/
+
+# 克隆音色的参考音频与转写（属于个人声音素材，不进仓库）
+python/voices/*.wav
+python/voices/*.mp3
+python/voices/*.txt
+!python/voices/README.md
+
 # ── 运行时数据（会话转录 / 记忆 / 索引）──
 data/
 *.log

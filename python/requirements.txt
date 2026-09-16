@@ -1,0 +1,19 @@
+# 核心依赖 —— 装完即可运行（默认 tone 引擎，用于验证前端链路）
+fastapi>=0.115
+uvicorn[standard]>=0.32
+numpy>=1.26
+pydantic>=2.9
+
+# ---- 真实 TTS（可选）----
+# 装之前先确认 GPU 与磁盘：模型约 4GB
+# torch>=2.2
+# torchaudio>=2.2
+# soundfile>=0.12
+# librosa>=0.10
+
+# ---- ASR（可选）----
+# funasr>=1.1
+# soundfile>=0.12
+
+# ---- VAD（可选）----
+# onnxruntime>=1.18

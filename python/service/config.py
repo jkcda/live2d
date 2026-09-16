@@ -1,0 +1,72 @@
+"""服务配置。
+
+全部通过环境变量覆盖，默认值面向「本地开发、开箱即跑」。
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+
+def _env(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+@dataclass(frozen=True)
+class Settings:
+    """运行时配置。实例化时读取一次环境变量。"""
+
+    # ---- 服务 ----
+    host: str
+    port: int
+    # 允许的跨域来源。前端在 5176 端口跑，不配 CORS 浏览器会直接拦掉请求
+    cors_origins: tuple[str, ...]
+
+    # ---- 引擎 ----
+    # tone = 内置合成音，零依赖，用来验证链路；cosyvoice = 真实 TTS
+    engine: str
+    default_voice: str
+    sample_rate: int
+
+    # ---- CosyVoice ----
+    # 模型目录，留空则用官方默认下载路径
+    cosyvoice_model_dir: str
+    cosyvoice_load_on_start: bool
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        origins = _env("NEXUS_CORS_ORIGINS", "*")
+        return cls(
+            host=_env("NEXUS_HOST", "127.0.0.1"),
+            port=_env_int("NEXUS_PORT", 8765),
+            cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
+            engine=_env("NEXUS_TTS_ENGINE", "tone").strip().lower(),
+            default_voice=_env("NEXUS_TTS_VOICE", "default"),
+            sample_rate=_env_int("NEXUS_SAMPLE_RATE", 24000),
+            cosyvoice_model_dir=_env("NEXUS_COSYVOICE_DIR", ""),
+            cosyvoice_load_on_start=_env("NEXUS_COSYVOICE_WARMUP", "0") == "1",
+        )
+
+
+settings = Settings.from_env()

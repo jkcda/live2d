@@ -1,0 +1,46 @@
+[project]
+name = "nexus-live2d-service"
+version = "0.1.0"
+description = "Live2D 桌面伴侣的推理服务：TTS / ASR / VAD"
+requires-python = ">=3.10"
+
+# 核心依赖刻意保持极简 —— 装完就能跑，默认用 tone 引擎验证整条链路
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "numpy>=1.26",
+    "pydantic>=2.9",
+]
+
+[project.optional-dependencies]
+# 真实 TTS：CosyVoice 2。装之前先确认 GPU 与磁盘（模型约 4GB）
+cosyvoice = [
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+]
+
+# ASR：FunASR SenseVoice-Small
+asr = [
+    "funasr>=1.1",
+    "soundfile>=0.12",
+]
+
+# VAD：Silero
+vad = [
+    "onnxruntime>=1.18",
+]
+
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.setuptools.packages.find]
+include = ["service*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

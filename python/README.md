@@ -25,9 +25,40 @@ GPT-SoVITS 音色相似度更高、中文生态最完善（45k star），但**�
 
 ---
 
-## 接口设计（待实现）
+## 接口
 
-### `WS /stream` —— 实时对话主通道
+### `GET /health` —— 探活
+
+```json
+{
+  "ok": true,
+  "engine": "tone",
+  "engine_ready": true,
+  "engine_detail": "内置合成音（开发用，非真实语音）",
+  "available_engines": ["tone", "cosyvoice"],
+  "sample_rate": 24000
+}
+```
+
+**注意 `ok` 与 `engine_ready` 是两件事**：服务活着但引擎不可用（比如 CosyVoice 没装）
+依然返回 200，状态放在 body 里。前端据此区分「连不上服务」和「服务在线但引擎没就绪」。
+
+### `GET /voices` —— 音色列表
+
+### `POST /tts` —— 合成
+
+```json
+{ "text": "你好呀", "voice": "default", "speed": 1.0 }
+```
+
+返回 `audio/wav`（16-bit PCM 单声道），响应头带 `X-Engine` 和 `X-Sample-Rate`。
+
+前端每凑够一句就调一次，所以这个接口会被**高频并发**调用。
+引擎内部的串行化由引擎自己负责（见 `tts/cosyvoice.py` 的锁），路由层不加锁。
+
+错误码：`400` 空文本 / `422` 参数越界 / `503` 引擎未就绪 / `500` 合成失败。
+
+### `WS /stream` —— 实时对话主通道（待实现）
 
 双向流。上行是麦克风音频块，下行是 TTS 音频块 + 事件。
 
@@ -42,9 +73,24 @@ GPT-SoVITS 音色相似度更高、中文生态最完善（45k star），但**�
       { type: 'tts_end', id: '...' }
 ```
 
-### `POST /tts` —— 非实时合成
+---
 
-给主动说话、预生成语音包用。返回完整音频。
+## 引擎
+
+| 引擎 | 依赖 | 用途 |
+|---|---|---|
+| **`tone`**（默认） | 无（只要 numpy） | **开发用**。按文本生成带音节节奏的类人声波形，用来验证整条链路 |
+| **`cosyvoice`** | torch + 模型权重 | 真实 TTS，支持零样本音色克隆 |
+
+### 为什么默认是 tone
+
+装 CosyVoice 要 GPU、要拉几个 G 的权重、还要编译一堆东西。
+但「切句 → 合成 → 排队 → 播放 → 口型 → 打断」这条链路**跟音色好不好听无关**，
+用 tone 就能完整验证。切到 cosyvoice 后前端一行都不用改。
+
+tone 的波形不是随便糊的：它按文本估算音节数、逐音节做包络、
+在标点处插停顿，RMS 落在 0.05~0.15（和真实 TTS 同量级），
+所以前端 `amplitude() * 3.5` 的放大系数不用调，口型幅度就是对的。
 
 ---
 
@@ -69,10 +115,48 @@ GPT-SoVITS 音色相似度更高、中文生态最完善（45k star），但**�
 
 ---
 
-## 启动（待实现）
+## 启动
 
 ```bash
 cd python
-uv sync                     # 或用 venv + pip
-python -m service.main      # 默认监听 127.0.0.1:8100
+
+# 方式一：venv
+python -m venv .venv
+.venv/Scripts/activate        # Windows
+# source .venv/bin/activate   # macOS / Linux
+pip install -r requirements.txt
+
+# 方式二：uv
+uv sync
+
+python -m service.main        # 默认监听 127.0.0.1:8765
 ```
+
+装真实 TTS：
+
+```bash
+pip install -e ".[cosyvoice]"
+# 再把 CosyVoice2-0.5B 权重放到 python/pretrained_models/，
+# 或用 NEXUS_COSYVOICE_DIR 指定路径
+NEXUS_TTS_ENGINE=cosyvoice python -m service.main
+```
+
+### 环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `NEXUS_HOST` | `127.0.0.1` | 监听地址 |
+| `NEXUS_PORT` | `8765` | 监听端口（改了要同步改前端的「服务地址」） |
+| `NEXUS_TTS_ENGINE` | `tone` | `tone` / `cosyvoice` |
+| `NEXUS_TTS_VOICE` | `default` | 默认音色 |
+| `NEXUS_SAMPLE_RATE` | `24000` | 输出采样率 |
+| `NEXUS_COSYVOICE_DIR` | 空 | 模型目录，留空则找 `pretrained_models/CosyVoice2-0.5B` |
+| `NEXUS_COSYVOICE_WARMUP` | `0` | 设 `1` 则启动时预加载模型（慢启动，但首次请求快） |
+| `NEXUS_CORS_ORIGINS` | `*` | 允许的跨域来源，逗号分隔 |
+
+---
+
+## 克隆音色
+
+见 [`voices/README.md`](voices/README.md)。简单说：在 `voices/` 放一对同名文件
+（`mio.wav` + `mio.txt`），然后把应用的「音色」填成 `mio`。
