@@ -103,6 +103,36 @@ if (!bars.count) {
   process.exitCode = 1
 }
 
+// 真的点一下表情按钮（走用户路径：悬浮 → 点按钮 → 看她换脸）
+const expression = await evaluate(`(async () => {
+  const chip = [...document.querySelectorAll('.test-bar button')]
+    .find((x) => /生气|伤心|开心|害羞|惊讶|无语/.test(x.textContent || ''))
+  if (!chip) return { ok: false, reason: '控制条上没有表情按钮' }
+  const label = chip.textContent.trim()
+  const read = () => {
+    const p = window.__nexusPortrait
+    return p ? { visible: p.layers().expressionVisible, id: p.layers().expressionId } : null
+  }
+  chip.click()
+  await new Promise((r) => setTimeout(r, 350))
+  const on = read()
+  chip.click()
+  await new Promise((r) => setTimeout(r, 350))
+  const off = read()
+  return { ok: true, label, on, off }
+})()`)
+if (expression.ok) {
+  const good = expression.on?.visible === true && expression.off?.visible === false
+  console.log(
+    `点表情按钮「${expression.label}」：点一下 → ${expression.on?.visible ? `换脸「${expression.on.id}」` : '没反应 ❌'}` +
+      `｜再点一下 → ${expression.off?.visible ? '没收回去 ❌' : '收回素颜 ✅'}`,
+  )
+  if (!good) process.exitCode = 1
+} else {
+  // Live2D 角色没有表情按钮是正常的（它的表情走模型自己的资源），只在立绘上要求
+  console.log(`表情按钮：${expression.reason}（Live2D 角色属于正常）`)
+}
+
 const opened = await evaluate(`(() => {
   const b = [...document.querySelectorAll('button')].find((x) => /设置|⚙/.test(x.textContent || ''))
   if (!b) return { ok: false }
