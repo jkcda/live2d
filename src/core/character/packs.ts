@@ -51,8 +51,15 @@ export interface CharacterFeatures {
   blink: boolean
   /** 瞳孔能跟着动（立绘需要独立的瞳孔/眼睛图层，目前一律 false） */
   gaze: boolean
-  /** 有几档嘴型；0 表示只能靠下巴拉伸，Live2D 恒为 1（参数驱动，不受张数限制） */
-  mouthTiers: number
+  /**
+   * 有几张**嘴差分素材**。
+   *
+   * 注意它和运行时 `mouths.length` 不是一个数：运行时会把「闭嘴」也算一档
+   * （底图本身就是闭嘴，那一档是空纹理），所以 1 张素材 = 运行时 2 档。
+   * 0 表示一张都没有，只能靠拉伸下巴表现张嘴。
+   * Live2D 恒为 0 —— 它的口型是参数驱动的，不吃素材。
+   */
+  mouthArt: number
   /** 有独立头发图层可做飘动 */
   hairSway: boolean
   /** 有动作组可播（只有 Live2D） */
@@ -150,7 +157,7 @@ export function featuresOf(pack: CharacterPack, probe?: PortraitProbe): Characte
     return {
       blink: true, // 引擎自带眨眼（我们用程序化眨眼，模型只需有眼睛参数）
       gaze: true, // Live2D 有 ParamEyeBallX/Y，可以做瞳孔跟随
-      mouthTiers: 1, // 参数驱动，不靠张数
+      mouthArt: 0, // 参数驱动，不吃素材
       hairSway: true, // 头发物理在模型里，参数一动就飘
       motions: true,
       expressions: true,
@@ -159,7 +166,7 @@ export function featuresOf(pack: CharacterPack, probe?: PortraitProbe): Characte
   return {
     blink: Boolean(probe?.eyesClosed),
     gaze: false, // 立绘要真·瞳孔跟随，得有独立的眼睛图层（AI 差分可做，尚未做）
-    mouthTiers: probe?.mouths ?? 0,
+    mouthArt: probe?.mouths ?? 0,
     hairSway: Boolean(probe?.hairFront || probe?.hairBack),
     motions: false,
     expressions: false,

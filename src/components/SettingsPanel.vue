@@ -58,7 +58,7 @@ const features = ref<CharacterFeatures | null>(null)
 const FEATURE_LABELS: Record<keyof CharacterFeatures, string> = {
   blink: '眨眼',
   gaze: '瞳孔跟随',
-  mouthTiers: '嘴型档数',
+  mouthArt: '嘴差分',
   hairSway: '头发飘动',
   motions: '动作组',
   expressions: '表情',
@@ -67,13 +67,21 @@ const FEATURE_LABELS: Record<keyof CharacterFeatures, string> = {
 const featureText = computed(() => {
   const f = features.value
   if (!f) return ''
+  const kind = packs.value.find((p) => p.id === characterId.value)?.kind
   const on: string[] = []
   if (f.blink) on.push(FEATURE_LABELS.blink)
   if (f.gaze) on.push(FEATURE_LABELS.gaze)
   if (f.hairSway) on.push(FEATURE_LABELS.hairSway)
   if (f.motions) on.push(FEATURE_LABELS.motions)
   if (f.expressions) on.push(FEATURE_LABELS.expressions)
-  on.push(`${FEATURE_LABELS.mouthTiers} ${f.mouthTiers}`)
+  // 口型：立绘看差分张数，Live2D 是参数驱动 —— 不能混成一个数字，否则会误导
+  on.push(
+    kind === 'live2d'
+      ? '口型（参数驱动）'
+      : f.mouthArt > 0
+        ? `嘴差分 ${f.mouthArt} 张`
+        : '嘴（只剩拉下巴）',
+  )
 
   // 缺什么也说出来 —— 免得以后加了功能，用户以为"点了没反应"
   const off: string[] = []
