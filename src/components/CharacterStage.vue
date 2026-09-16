@@ -62,6 +62,15 @@ const barVisible = ref(false)
 let barHideAt = 0
 /** 移开后延迟多久收起（毫秒）—— 够人把鼠标移到按钮上 */
 const BAR_HIDE_DELAY_MS = 600
+
+/**
+ * 离开多久才算「你回来了」（毫秒）。
+ *
+ * 为什么要一个阈值：切窗口的动作一天几百次（alt-tab 看个东西就回来了），
+ * 每次都让她招手就成了抽风。45 秒的意思是"你确实去忙别的了，现在回来了"。
+ * 嫌太灵敏就调大，嫌她太冷淡就调小。
+ */
+const AWAY_BEFORE_GREET_MS = 45_000
 /** 当前渲染器（立绘 / Live2D），显示在状态里便于确认 */
 const kindLabel = ref('')
 /** 当前角色名，显示在测试条上 */
@@ -106,6 +115,35 @@ function togglePose(id: string): void {
   const next = activePose.value === id ? null : id
   activePose.value = next
   portrait.setPose(next)
+}
+
+/**
+ * 「你切回来的时候她跟你打个招呼」。
+ *
+ * 两个信号都要听，因为它们覆盖的场景不一样：
+ *   · 窗口失焦/获得焦点（`blur` / `focus`）—— 你 alt-tab 去别的地方又回来；
+ *   · 页面/窗口被隐藏又显示（`visibilitychange`）—— 窗口被最小化、切到别的虚拟桌面。
+ * 桌宠窗口通常一直可见，所以只靠 visibility 是收不到信号的。
+ *
+ * 中间那次"离开时长"用时间戳记，不在 blur 时就立刻决定 ——
+ * 阈值判断（见 AWAY_BEFORE_GREET_MS）是这件事唯一有产品味道的地方。
+ */
+let awaySince = 0
+
+function onAway(): void {
+  if (!awaySince) awaySince = Date.now()
+}
+
+function onBack(): void {
+  const away = awaySince ? Date.now() - awaySince : 0
+  awaySince = 0
+  if (away >= AWAY_BEFORE_GREET_MS) portrait?.greet()
+}
+
+/** 窗口被隐藏/显示：隐藏算"离开"，显示算"回来"（和失焦那两条走同一套判断） */
+function onVisibilityChange(): void {
+  if (document.hidden) onAway()
+  else onBack()
 }
 
 let stage: CharacterStage | null = null
@@ -467,6 +505,33 @@ onMounted(async () => {
   const el = host.value
   if (!el) return
 
+  /*
+   * 「你切回来就打个招呼」的监听。
+   * 在 onMounted 里挂、onUnmounted 里摘 —— 组件被拆掉还留着监听会打到已经销毁的舞台上。
+   */
+  window.addEventListener('blur', onAway)
+  window.addEventListener('focus', onBack)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
+  /*
+   * 开发期：把"假装离开了 N 毫秒"开出来给验证脚本用。
+   * 这段逻辑是**真实时间**驱动的（要等 45 秒），脚本没法干等 ——
+   * 有这条缝才能测到同一段判断（阈值、以及"回来了要不要打招呼"）。
+   */
+  if (import.meta.env.DEV) {
+    Object.assign(window as unknown as Record<string, unknown>, {
+      __nexusAway: {
+        /** 假装刚刚离开了 `ms` 毫秒、现在回来了 */
+        simulate: (ms: number) => {
+          awaySince = Date.now() - ms
+          onBack()
+        },
+        /** 当前的离开时长（毫秒，0 = 没离开） */
+        awayMs: () => (awaySince ? Date.now() - awaySince : 0),
+      },
+    })
+  }
+
   try {
     const s = await initCharacter()
     await mount(s)
@@ -511,6 +576,9 @@ function logAbilities(live2d: Live2DCharacter): void {
 onUnmounted(() => {
   unsubscribePack?.()
   resizeObserver?.disconnect()
+  window.removeEventListener('blur', onAway)
+  window.removeEventListener('focus', onBack)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   // 不要 dispose 共享的 audioPlayer —— 它是全局单例，关掉会让整个应用失去音频
   unmount()
 })

@@ -107,6 +107,16 @@ const POSE_HOLD_MS = 3200
 const POSE_FADE_MS = 170
 
 /**
+ * 两帧姿势的交替节拍（毫秒）—— 一个姿势有第二帧时，每这么久换一次图。
+ *
+ * 300ms ≈ 3.3 次/秒。为什么是这个量级：
+ *   · 太慢（>500ms）看起来像两张图在闪，而不是手在摆；
+ *   · 太快（<180ms）人眼补不出"手在动"，只觉得画面在抖。
+ * 实际手感还取决于素材（两帧差多少），嫌快嫌慢改这一个数就行。
+ */
+const POSE_SWING_MS = 300
+
+/**
  * 表情的嘴那一块往外扩多少像素（再遮住）。
  *
  * 为什么要一个数、为什么是 6：表情差分的**嘴是单独一坨**（和眉毛/脸颊不相连），
@@ -297,6 +307,8 @@ export async function createPortraitStage(
   let poseUntil = 0
   let poseMix = 0
   let lastPoseAt = 0
+  /** 两帧姿势当前播到第几帧（0 = 第一帧、1 = 第二帧；只有一帧时恒为 0） */
+  let poseFrame = 0
 
   /*
    * 表情图层：整张差分盖在脸上（眉毛/眼睛/脸颊都归它），**在瞳孔和眼差分之下**。
@@ -487,6 +499,8 @@ export async function createPortraitStage(
     pose: null as string | null,
     /** 底图 → 姿态的混合进度（0 = 全底图，1 = 全姿态） */
     poseMix: 0,
+    /** 两帧姿势播到第几帧 */
+    poseFrame: 0,
   }
 
   const applyFrame = (frame: CharacterFrame) => {
@@ -636,7 +650,18 @@ export async function createPortraitStage(
       poseMix =
         target > poseMix ? Math.min(target, poseMix + step) : Math.max(target, poseMix - step)
 
-      if (pose && poseLayer.texture !== pose.texture) poseLayer.texture = pose.texture
+      /*
+       * 两帧姿势：按节拍在 A/B 之间换图 —— 一张图只能"举着手站着"，
+       * 两张交替才是真的在挥手（PNGTuber 的标准做法：不做形变，靠换图 + 人眼补帧）。
+       *
+       * 用 `now / POSE_SWING_MS` 直接算，不自己攒计时器：
+       * 状态越少越不容易在暂停/切角色之后错位。只有一帧时永远取 0，等于不变。
+       */
+      if (pose) {
+        poseFrame = pose.textureB ? Math.floor(now / POSE_SWING_MS) % 2 : 0
+        const wanted = poseFrame === 1 ? pose.textureB! : pose.texture
+        if (poseLayer.texture !== wanted) poseLayer.texture = wanted
+      }
       poseLayer.alpha = poseMix
       poseLayer.visible = poseMix > 0.001
       // 底图整体淡出：姿态图里也有头和脸（且和底图逐像素一致），所以不会缺东西
@@ -644,6 +669,7 @@ export async function createPortraitStage(
       for (const s of bodySprites) s.alpha = bodyAlpha
       shown.pose = pose?.id ?? null
       shown.poseMix = poseMix
+      shown.poseFrame = poseFrame
     }
   }
 
@@ -753,8 +779,12 @@ export async function createPortraitStage(
   const recentExpressions: string[] = []
 
   const poseNames = assets.poses.map((p) => p.id)
-  /** 纹理 → id：验证脚本要能说出"现在摆的是哪个姿势" */
-  const poseIds = new Map(assets.poses.map((p) => [p.texture, p.id]))
+  /** 纹理 → id：验证脚本要能说出"现在摆的是哪个姿势"（两帧都映射到同一个 id） */
+  const poseIds = new Map<Texture, string>()
+  for (const p of assets.poses) {
+    poseIds.set(p.texture, p.id)
+    if (p.textureB) poseIds.set(p.textureB, p.id)
+  }
 
   /**
    * 换姿势（`null` = 回到底图那套）。
@@ -787,9 +817,16 @@ export async function createPortraitStage(
     motionGroups: {},
   }
 
-  /** 打招呼用的姿势 id：有「招手」就用它（`poses.ts` 里的 id） */
+  /**
+   * 打招呼用的姿势 id：有「招手」就用它（`poses.ts` 里的 id）
+   *
+   * 两种情况不打断：手动选了一个不过期的姿势（那是用户特意摆的），
+   * 以及她已经在招手了（连着回来两次不该重新开始一遍）。
+   */
   const GREETING_POSE = 'wave'
   const greet = (): void => {
+    if (pose && poseUntil === 0) return
+    if (pose?.id === GREETING_POSE) return
     if (assets.poses.some((p) => p.id === GREETING_POSE)) setPose(GREETING_POSE, POSE_HOLD_MS)
   }
 
@@ -882,6 +919,10 @@ export async function createPortraitStage(
           poseVisible: poseLayer?.visible ?? false,
           poseId: poseLayer ? (poseIds.get(poseLayer.texture) ?? null) : null,
           poseCount: assets.poses.length,
+          /** 有几帧（2 = 会挥手，1 = 只保持） */
+          poseFrames: assets.poses.map((p) => (p.textureB ? 2 : 1)),
+          /** 当前播到第几帧 */
+          poseFrame,
           /** 底图 → 姿态的混合进度：1 = 完全换成姿态图 */
           poseMix,
           /** 底图的 alpha（换姿势时淡出，用来断言"没有两张脸叠着"） */

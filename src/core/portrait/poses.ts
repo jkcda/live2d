@@ -31,6 +31,27 @@ export const POSE_SPECS: readonly PoseSpec[] = [
   { id: 'wave', label: '招手', aliases: ['打招呼', '挥手'] },
 ]
 
+/**
+ * 第二帧的文件名后缀：`pose_wave.png` 是姿势本身，`pose_wave_b.png` 是它的**第二帧**。
+ *
+ * 为什么要第二帧：一张图只能"举着手站着"，动不起来。
+ * 两张（手抬起 / 手摆到另一侧）按节拍交替播放，看起来才是真的在**挥手** ——
+ * 这是 PNGTuber 的老办法：不做形变，靠离散换图 + 人眼补帧。
+ *
+ * 只有一张时不会报错，就是"举着不动"（见 stage 里的 poseFrame）。
+ */
+export const POSE_FRAME_B_SUFFIX = '_b'
+
+/** 一个姿势所有可能的文件名（id 优先，其次别名）；探测和加载共用 */
+export function poseFileNames(spec: PoseSpec): string[] {
+  return [spec.id, ...(spec.aliases ?? [])]
+}
+
+/** 第二帧的文件名：在第一帧的名字上加后缀 */
+export function poseSecondFrameName(name: string): string {
+  return `${name}${POSE_FRAME_B_SUFFIX}`
+}
+
 const BY_NAME = new Map<string, PoseSpec>()
 for (const spec of POSE_SPECS) {
   BY_NAME.set(spec.id, spec)
@@ -47,7 +68,3 @@ export function poseLabel(name: string): string {
   return poseSpec(name)?.label ?? name
 }
 
-/** 一张姿态差分所有可能的文件名（id 优先，其次别名）；探测和加载共用 */
-export function poseFileNames(spec: PoseSpec): string[] {
-  return [spec.id, ...(spec.aliases ?? [])]
-}

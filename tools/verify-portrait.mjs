@@ -431,7 +431,7 @@ async function main() {
     const poseShots = {}
     const poseChecks = [['素材里探测到姿态差分', poseInfo.count > 0]]
     console.log(
-      `\n姿势：素材 ${poseInfo.count} 张（${poseInfo.available.map((p) => `${p.id}=${p.label}`).join('、') || '无'}）`,
+      `\n姿势：${poseInfo.count} 个（${poseInfo.available.map((p) => `${p.id}=${p.label}`).join('、') || '无'}）`,
     )
 
     if (poseInfo.count > 0) {
@@ -477,6 +477,65 @@ async function main() {
       )
       // 打招呼这条会顺手把底图 alpha 也带回去，别让后面的用例测到半截状态
       await sleep(300)
+
+      /*
+       * 帧交替：一张图只能"举着手站着"，两张才谈得上挥手。
+       * 所以这里先看素材有几帧，再按节拍采样 poseFrame：
+       *   两帧 → 采样期间必须**出现过两种值**（真在换图）；
+       *   一帧 → 必须**始终是 0**（没有第二帧就别假装在动）。
+       */
+      const frames = (await layers()).poseFrames?.[0] ?? 1
+      await evaluate(`window.__nexusPortrait.setPose('wave')`)
+      await sleep(420)
+      const seq = []
+      for (let i = 0; i < 8; i++) {
+        seq.push((await layers()).poseFrame)
+        await sleep(140)
+      }
+      await evaluate(`window.__nexusPortrait.setPose(null)`)
+      await sleep(320)
+      const alternated = seq.includes(0) && seq.includes(1)
+      poseChecks.push([
+        frames === 2
+          ? '两帧素材 → 按节拍在 A/B 之间换图（真的在挥手）'
+          : '单帧素材 → 帧号恒为 0（只保持，不假装在动）',
+        frames === 2 ? alternated : seq.every((f) => f === 0),
+      ])
+      console.log(
+        `  帧交替：素材 ${frames} 帧｜采样 ${seq.join('')} → ${
+          frames === 2
+            ? alternated
+              ? '两帧都在用 ✅'
+              : '没换过图 ❌'
+            : '保持不变 ✅'
+        }`,
+      )
+
+      /*
+       * 「你切回来时打个招呼」：阈值是这件事唯一有产品味道的地方，所以要**两边都测**——
+       * 离开太久要有反应，离开一会儿（alt-tab 一下就回来）**必须没反应**，
+       * 否则她一天到晚在招手。
+       */
+      await evaluate(`window.__nexusPortrait.setPose(null)`)
+      await sleep(420)
+      const simulateAway = async (ms) => {
+        await evaluate(`window.__nexusAway.simulate(${ms})`)
+        await sleep(420)
+        return layers()
+      }
+      const shortAway = await simulateAway(5000)
+      await evaluate(`window.__nexusPortrait.setPose(null)`)
+      await sleep(420)
+      const longAway = await simulateAway(60000)
+      await evaluate(`window.__nexusPortrait.setPose(null)`)
+      poseChecks.push(
+        ['离开一会儿（5 秒）回来 → 不招手（不然 alt-tab 一次就招一次）', shortAway.poseVisible === false],
+        ['离开久了（60 秒）回来 → 招手打招呼', longAway.poseVisible === true],
+      )
+      console.log(
+        `  切回来时：离开 5 秒 → ${shortAway.poseVisible ? '招手了 ❌' : '不打扰 ✅'}` +
+          `｜离开 60 秒 → ${longAway.poseVisible ? '招手 ✅' : '没反应 ❌'}`,
+      )
     }
 
     let poseOk = true

@@ -25,7 +25,7 @@
 
 import { Assets, Rectangle, Texture } from 'pixi.js'
 import { EXPRESSION_SPECS, expressionFileNames } from './expressions'
-import { POSE_SPECS, poseFileNames } from './poses'
+import { POSE_SPECS, poseFileNames, poseSecondFrameName } from './poses'
 
 export interface PortraitRegion {
   x: number
@@ -102,6 +102,13 @@ export interface PortraitPose {
   id: string
   label: string
   texture: Texture
+  /**
+   * 第二帧（`pose_<id>_b.png`，可选）。
+   *
+   * 一张图只能"举着手站着"；两张交替才是真的在挥手。
+   * 没有第二帧就是静态保持 —— 不报错，只是动不起来。
+   */
+  textureB?: Texture
 }
 
 export interface PortraitAssets {
@@ -518,22 +525,27 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
 
   /*
    * 姿态差分：整身替换图，和表情一样按候选名探（含中文别名）。
-   * 同样地，探测（设置面板）和加载共用 poses.ts 那一份清单。
+   * 同一个名字还会再探一张 `_b` 作为**第二帧**（手摆到另一侧），有就交替播放 = 挥手。
    */
   const poses: PortraitPose[] = []
   for (const spec of POSE_SPECS) {
     for (const name of poseFileNames(spec)) {
       const texture = await loadOptionalTexture(`${base}/pose_${name}.png`)
-      if (texture) {
-        poses.push({ id: spec.id, label: spec.label, texture })
-        break
-      }
+      if (!texture) continue
+      const textureB = await loadOptionalTexture(
+        `${base}/pose_${poseSecondFrameName(name)}.png`,
+      )
+      poses.push({ id: spec.id, label: spec.label, texture, textureB })
+      break
     }
   }
 
   if (import.meta.env.DEV && poses.length) {
     console.info(
-      `[portrait] 姿态差分 ${poses.length} 张：` + poses.map((p) => `${p.id}(${p.label})`).join('、'),
+      `[portrait] 姿态差分 ${poses.length} 个：` +
+        poses
+          .map((p) => `${p.id}(${p.label}${p.textureB ? '，两帧 → 会挥手' : '，单帧 → 只保持'})`)
+          .join('、'),
     )
   }
 
