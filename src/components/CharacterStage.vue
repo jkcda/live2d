@@ -2,12 +2,12 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { createLive2DCharacter, type Live2DCharacter } from '@/core/character/live2d'
 import { createPortraitStage } from '@/core/portrait/stage'
-import { resolveCharacterKind } from '@/core/character/mode'
 import type { CharacterFrame, CharacterStage } from '@/core/character/types'
 import { resolveModelUrl } from '@/core/live2d/models'
 import { classify } from '@/core/live2d/reactions'
 import { LipSyncDriver } from '@/core/live2d/lipsync'
 import { IdleAnimator, type IdleFrame } from '@/core/live2d/idle'
+import { initCharacter, onCharacterChange, selectCharacter, type PackState } from '@/core/character/selection'
 import { idleRuntime } from '@/core/settings'
 import { audioPlayer } from '@/core/runtime'
 
@@ -19,10 +19,18 @@ import { audioPlayer } from '@/core/runtime'
  *   1. 有 Groups.LipSync（否则口型无处可写，比如 Mao 是 ParamA）
  *   2. 有 Expressions / HitAreas（否则表情和点击反馈做不了，比如 miara 两样都没有）
  *
- * 开发期可以用 ?model=<目录>/<文件>.model3.json 临时换模型，
- * 或用 ?portrait=1 切到立绘模式（素材放 public/portrait/）。
+/**
+ * 角色舞台。
+ *
+ * ★ 这里做的核心事情是**热插拔**：切换角色不需要刷新页面。
+ *   以前舞台是 onMounted 里一次性建的，换个角色只能 location.reload()；
+ *   现在拆成 mount(pack) / unmount()：
+ *     销毁旧渲染器 → 清空容器 → 建新的，音频队列和对话会话都不受影响。
+ *   切换失败（素材缺失）会**回退到原来的角色**并报错，不会切成一片空白。
+ *
+ * 角色从哪来：`core/character/selection.ts`（清单见 public/characters/index.json）。
+ * 开发期可以用 ?pack=<id> 指定角色，?portrait=1 / ?live2d=1 按类型挑一个（见 packs.ts）。
  */
-const EXPLICIT_MODEL = 'Haru/Haru.model3.json'
 
 function modelOverride(): string | undefined {
   if (!import.meta.env.DEV) return undefined
@@ -52,6 +60,8 @@ let barHideAt = 0
 const BAR_HIDE_DELAY_MS = 600
 /** 当前渲染器（立绘 / Live2D），显示在状态里便于确认 */
 const kindLabel = ref('')
+/** 当前角色名，显示在测试条上 */
+const packName = ref('')
 
 let stage: CharacterStage | null = null
 let idle: IdleAnimator | null = null
@@ -62,6 +72,16 @@ let resizeObserver: ResizeObserver | null = null
 /** 最近一次指针位置，供 rAF 里做命中判定（避免在 pointermove 里直接采样） */
 let pointer: { x: number; y: number } | null = null
 let lastHitAt = 0
+/** 当前生效的角色状态（热插拔时要拿它对比 / 回退） */
+let packState: PackState | null = null
+/** 帧循环里读的待机幅度：角色可以覆盖全局设置 */
+let idleFactor = 1
+/** 角色变化订阅的取消函数 */
+let unsubscribePack: (() => void) | null = null
+/** 正在切换的角色 id（防重入，见 switchPack） */
+let switching: string | null = null
+/** 切换途中排队的下一个角色 id */
+let pendingId: string | null = null
 
 /**
  * 按「待机幅度」设置衰减参数帧。
@@ -105,7 +125,7 @@ function frame(ts: number) {
   const idleFrame = idle.update(dt)
   const mouth = lipsync.update(audioPlayer.amplitude(), dt)
 
-  const next: CharacterFrame = { ...dampIdle(idleFrame, idleRuntime.factor), mouth }
+  const next: CharacterFrame = { ...dampIdle(idleFrame, idleFactor), mouth }
   stage.applyFrame(next)
 
   /*
@@ -206,45 +226,139 @@ function testInterrupt() {
   lipsync?.reset()
 }
 
+/**
+ * 建舞台（可重复调用）。
+ *
+ * 每次都会**先清空容器**：旧渲染器的画布必须自己移掉 ——
+ * Pixi 的 destroy 只释放资源，不保证把 <canvas> 从 DOM 摘干净，
+ * 留着的话新角色会叠在旧角色上面（表现为"换了角色但没变"）。
+ */
+async function mount(s: PackState): Promise<void> {
+  const el = host.value
+  if (!el) return
+  const pack = s.pack
+
+  // 待机幅度：角色自己的 tuning 优先，否则用设置里的全局值
+  idleFactor = pack.tuning?.idleFactor ?? idleRuntime.factor
+
+  if (pack.kind === 'portrait') {
+    status.value = `立绘加载中…（${pack.name}）`
+    stage = await createPortraitStage(el, {
+      baseUrl: pack.dir ?? 'portrait',
+      tuning: pack.tuning,
+    })
+    kindLabel.value = '立绘'
+  } else {
+    status.value = `模型加载中…（${pack.name}）`
+    const url = await resolveModelUrl(modelOverride() ?? pack.model)
+    const live2d = await createLive2DCharacter(el, { url })
+    stage = live2d
+    kindLabel.value = 'Live2D'
+    logAbilities(live2d)
+  }
+
+  // 口型手感可以按角色调（比如某个角色的立绘振幅偏小）
+  lipsync = new LipSyncDriver(pack.tuning?.lipsync)
+  idle ??= new IdleAnimator()
+  lastTs = 0
+  cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(frame)
+
+  packState = s
+  packName.value = pack.name
+  status.value = ''
+  failed.value = false
+  console.info(
+    `[stage] 角色就位：${pack.name}（${pack.kind}）｜能力 ${JSON.stringify(s.features)}` +
+      `${s.probe ? `｜素材 ${JSON.stringify(s.probe)}` : ''}`,
+  )
+
+  if (import.meta.env.DEV) {
+    // 开发期调试钩子：自动化脚本靠它读到舞台 / 口型 / 音频的真实状态
+    Object.assign(window as unknown as Record<string, unknown>, {
+      __nexusStage: { kind: pack.kind, pack, stage, idle, lipsync, audioPlayer, features: s.features },
+    })
+  }
+}
+
+/** 卸载舞台：停帧循环、销毁渲染器、清空容器 */
+function unmount(): void {
+  cancelAnimationFrame(rafId)
+  rafId = 0
+  pointer = null
+  hovering.value = false
+  stage?.destroy()
+  stage = null
+  // 渲染器可能留了 canvas / 调试用元素，一律清掉
+  if (host.value) host.value.replaceChildren()
+}
+
+/**
+ * 切换角色：先建新的，失败就回退。
+ *
+ * 顺序很重要 —— 先 unmount 再 mount 的话，一旦新素材有问题，
+ * 用户面对的是一片空白且不知道原因；这里改成**建成功了才销毁旧的**，
+ * 失败时把旧角色重新挂回来并显示错误。
+ *
+ * ★ 必须防重入：selectCharacter 会通知订阅者，而订阅者见"选中变了"又会调回这里 ——
+ *   不加锁就是**无限递归**（每轮都新建一个舞台），第一次写出来直接把页面跑死了。
+ *   所以：自己发起的那次变化用 `switching` 挡掉；切换途中来的新请求记到 `pending`，
+ *   等这一轮结束再处理（用户连点两次不该丢第二次）。
+ */
+async function switchPack(id: string): Promise<void> {
+  if (switching) {
+    pendingId = id
+    return
+  }
+  switching = id
+  const previous = packState
+  try {
+    const next = await selectCharacter(id)
+    unmount()
+    await mount(next)
+  } catch (err) {
+    failed.value = true
+    status.value = err instanceof Error ? err.message : String(err)
+    console.error('[stage] 切换角色失败，回退到上一个', err)
+    if (previous) {
+      try {
+        unmount()
+        await mount(previous)
+        status.value = `切换失败，仍在使用「${previous.pack.name}」：${status.value}`
+      } catch {
+        // 回退也失败就只剩错误信息了
+      }
+    }
+  } finally {
+    switching = null
+    const queued = pendingId
+    pendingId = null
+    if (queued && queued !== packState?.pack.id) void switchPack(queued)
+  }
+}
+
 onMounted(async () => {
   const el = host.value
   if (!el) return
 
-  const kind = resolveCharacterKind()
-
   try {
-    if (kind === 'portrait') {
-      status.value = '立绘加载中…'
-      stage = await createPortraitStage(el)
-      kindLabel.value = '立绘'
-    } else {
-      const url = await resolveModelUrl(modelOverride() ?? (EXPLICIT_MODEL || undefined))
-      const live2d = await createLive2DCharacter(el, { url })
-      stage = live2d
-      kindLabel.value = 'Live2D'
-      logAbilities(live2d)
-    }
-
-    idle = new IdleAnimator()
-    lipsync = new LipSyncDriver()
-    status.value = ''
-    rafId = requestAnimationFrame(frame)
-
-    // 开发期调试钩子：自动化脚本靠它读到舞台 / 口型 / 音频的真实状态
-    if (import.meta.env.DEV) {
-      Object.assign(window as unknown as Record<string, unknown>, {
-        __nexusStage: { kind, stage, idle, lipsync, audioPlayer },
-      })
-    }
+    const s = await initCharacter()
+    await mount(s)
 
     resizeObserver = new ResizeObserver(() => {
       if (stage && el) stage.layout(el.clientWidth, el.clientHeight)
     })
     resizeObserver.observe(el)
+
+    unsubscribePack = onCharacterChange((next) => {
+      // 这次变化就是自己发起的（selectCharacter 会回调订阅者）→ 跳过，否则无限递归
+      if (switching === next.pack.id) return
+      // 只处理"选中变了但舞台还没跟上"的情况（切换动作由 switchPack 负责）
+      if (next.pack.id !== packState?.pack.id) void switchPack(next.pack.id)
+    })
   } catch (err) {
     failed.value = true
-    status.value =
-      err instanceof Error ? err.message : String(err)
+    status.value = err instanceof Error ? err.message : String(err)
     console.error('[stage] 加载失败', err)
   }
 })
@@ -269,11 +383,10 @@ function logAbilities(live2d: Live2DCharacter): void {
 }
 
 onUnmounted(() => {
-  cancelAnimationFrame(rafId)
+  unsubscribePack?.()
   resizeObserver?.disconnect()
   // 不要 dispose 共享的 audioPlayer —— 它是全局单例，关掉会让整个应用失去音频
-  stage?.destroy()
-  stage = null
+  unmount()
 })
 </script>
 
@@ -307,6 +420,7 @@ onUnmounted(() => {
         @pointerleave="barHovered = false"
       >
         <span class="tag">{{ kindLabel }}</span>
+        <span v-if="packName" class="name">{{ packName }}</span>
         <button class="btn" @click="testLipSync">测试口型</button>
         <button class="btn" @click="testInterrupt">打断</button>
       </div>
@@ -407,6 +521,20 @@ onUnmounted(() => {
   background: rgba(90, 120, 200, 0.28);
   border: 1px solid rgba(120, 150, 220, 0.35);
   color: #b8c8e0;
+}
+
+/* 角色名：弱化显示，只是让人确认「现在是谁」 */
+.name {
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(24, 24, 28, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #a0a0aa;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .btn {

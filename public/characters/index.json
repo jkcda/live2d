@@ -1,0 +1,25 @@
+{
+  "//": "角色清单。加一个角色 = 在这里加一条 + 把素材放进对应目录（详见 docs/portrait-assets.md）。",
+  "//current": "上次选中的角色；用户在设置里切换后会覆盖这一项（存在 localStorage，这里是默认值）",
+  "current": "me",
+  "characters": [
+    {
+      "id": "me",
+      "name": "我的角色（立绘差分）",
+      "kind": "portrait",
+      "dir": "portrait",
+      "note": "素材在 public/portrait/：body.png + mouth_1.png + eyes_closed.png 就能用，不用写配置",
+      "tuning": {
+        "mouth": { "closedLevel": 0.1, "minOpenScale": 0.35 },
+        "motion": { "bobPercent": 0.004, "swayDegrees": 0.8, "breatheScale": 0.004 }
+      }
+    },
+    {
+      "id": "haru",
+      "name": "Haru（官方示例模型）",
+      "kind": "live2d",
+      "model": "Haru/Haru.model3.json",
+      "note": "有 8 个表情、Idle/TapBody 动作组；模型受 Live2D 授权条款限制，不随仓库分发"
+    }
+  ]
+}

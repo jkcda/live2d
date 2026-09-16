@@ -16,6 +16,7 @@
 
 import { Application, Container, Sprite } from 'pixi.js'
 import type { CharacterAbilities, CharacterFrame, CharacterStage } from '../character/types'
+import type { CharacterTuning } from '../character/packs'
 import {
   buildAlphaMask,
   loadPortrait,
@@ -29,9 +30,22 @@ const ANGLE_Z_RANGE = 1.4
 const BODY_ANGLE_RANGE = 2
 
 /** 低于这个开口度就是「闭嘴」= 不叠任何差分 */
-const CLOSED_LEVEL = 0.1
+const DEFAULT_CLOSED_LEVEL = 0.1
 /** 刚开口时的最小缩放：再小就看不出张开了，只剩一条缝 */
-const MIN_OPEN_SCALE = 0.35
+const DEFAULT_MIN_OPEN_SCALE = 0.35
+
+/** 口型的开合映射参数（可被角色包覆盖） */
+export interface MouthMapping {
+  /** 低于它就闭嘴，调大 = 更容易闭 */
+  closedLevel: number
+  /** 最小开口时的纵向缩放，调大 = 微张也张得更明显 */
+  minOpenScale: number
+}
+
+export const DEFAULT_MOUTH_MAPPING: MouthMapping = {
+  closedLevel: DEFAULT_CLOSED_LEVEL,
+  minOpenScale: DEFAULT_MIN_OPEN_SCALE,
+}
 
 /**
  * 开口度 → (用第几张差分, 纵向缩放)。
@@ -40,7 +54,7 @@ const MIN_OPEN_SCALE = 0.35
  * ——直接按阈值二选一的话，看起来就是全程张嘴（这是实际踩过的坑）。
  * 所以中间那些开口度靠**纵向缩放**凑：
  *
- *   1. 先算一个连续的开度 openness（0.35~1，低开度用幂函数抬一抬，
+ *   1. 先算一个连续的开度 openness（最小开度~1，低开度用幂函数抬一抬，
  *      因为小振幅在听觉上也是"在说话"，嘴不能只开一条缝）；
  *   2. 有多少张差分就有几档，取「第一档标称开度 ≥ openness」的那张；
  *   3. 缩放 = openness / 该档标称开度 —— 于是换图那一刻两张的**视觉大小是连着的**，
@@ -48,13 +62,18 @@ const MIN_OPEN_SCALE = 0.35
  *
  * 只有一张差分时（最常见）：永远用它，缩放直接就是 openness。
  */
-export function mouthLevel(m: number, tiers: number): { index: number; scale: number } {
+export function mouthLevel(
+  m: number,
+  tiers: number,
+  map: MouthMapping = DEFAULT_MOUTH_MAPPING,
+): { index: number; scale: number } {
+  const { closedLevel, minOpenScale } = map
   if (tiers <= 1) return { index: Math.max(0, tiers - 1), scale: 1 }
   const art = tiers - 1 // 真·差分张数（索引 0 是「闭嘴」= 空纹理）
-  if (m < CLOSED_LEVEL) return { index: 0, scale: 1 }
+  if (m < closedLevel) return { index: 0, scale: 1 }
 
-  const t = Math.min(1, Math.max(0, (m - CLOSED_LEVEL) / (1 - CLOSED_LEVEL)))
-  const openness = MIN_OPEN_SCALE + (1 - MIN_OPEN_SCALE) * Math.pow(t, 0.7)
+  const t = Math.min(1, Math.max(0, (m - closedLevel) / (1 - closedLevel)))
+  const openness = minOpenScale + (1 - minOpenScale) * Math.pow(t, 0.7)
 
   let index = art
   for (let k = 1; k <= art; k++) {
@@ -64,12 +83,17 @@ export function mouthLevel(m: number, tiers: number): { index: number; scale: nu
     }
   }
   const nominal = index / art
-  return { index, scale: Math.min(1, Math.max(MIN_OPEN_SCALE, openness / nominal)) }
+  return { index, scale: Math.min(1, Math.max(minOpenScale, openness / nominal)) }
 }
 
 export interface PortraitStageOptions {
   /** 素材目录，默认 `portrait` */
   baseUrl?: string
+  /**
+   * 按角色覆盖的可调参数（来自角色包 `character.json` 的 tuning）。
+   * 优先级：这里的值 > portrait.json 的 motion > 内置默认。
+   */
+  tuning?: CharacterTuning
 }
 
 export async function createPortraitStage(
@@ -203,9 +227,15 @@ export async function createPortraitStage(
    * 设置 → 角色 → 待机动作 整体加减。
    */
   const motion = {
-    bobPercent: manifest.motion?.bobPercent ?? 0.004,
-    swayDegrees: manifest.motion?.swayDegrees ?? 0.8,
-    breatheScale: manifest.motion?.breatheScale ?? 0.004,
+    bobPercent: opts.tuning?.motion?.bobPercent ?? manifest.motion?.bobPercent ?? 0.004,
+    swayDegrees: opts.tuning?.motion?.swayDegrees ?? manifest.motion?.swayDegrees ?? 0.8,
+    breatheScale: opts.tuning?.motion?.breatheScale ?? manifest.motion?.breatheScale ?? 0.004,
+  }
+
+  /** 口型的开合映射，同样可以按角色覆盖 */
+  const mouthMap: MouthMapping = {
+    closedLevel: opts.tuning?.mouth?.closedLevel ?? DEFAULT_MOUTH_MAPPING.closedLevel,
+    minOpenScale: opts.tuning?.mouth?.minOpenScale ?? DEFAULT_MOUTH_MAPPING.minOpenScale,
   }
 
   const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -271,7 +301,7 @@ export async function createPortraitStage(
     // 口型
     const m = clamp01(frame.mouth)
     if (mouth && mouthStates.length) {
-      const pick = mouthLevel(m, mouthStates.length)
+      const pick = mouthLevel(m, mouthStates.length, mouthMap)
       shown.mouthIndex = pick.index
       shown.mouthScale = pick.scale
       mouth.texture = mouthStates[pick.index]

@@ -288,6 +288,41 @@ async function main() {
   console.log(`待机样本：normal ${idleNormal.length} 张、off ${idleOff.length} 张`)
   writeFileSync(join(OUT_DIR, 'idle.json'), JSON.stringify({ idleNormal, idleOff }, null, 2))
 
+  /*
+   * 热插拔：换角色**不该刷新页面**。
+   *
+   * 判据很硬：先在页面上放一个标记，切完角色后标记还在 ⇒ 页面没有重新加载。
+   * （光看"角色变了"不够 —— 刷新页面也能让角色变，但那样正在播放的语音会被打断。）
+   */
+  const packs = await evaluate(`window.__nexusCharacter ? window.__nexusCharacter.list() : null`)
+  if (packs && packs.length > 1) {
+    const before = await evaluate(`(() => {
+      window.__hotSwapMarker = 'alive-' + Date.now()
+      return window.__nexusStage.kind
+    })()`)
+    const target = packs.find((p) => p.kind !== before) ?? packs[0]
+    console.log(`\n热插拔：${before} → ${target.kind}（${target.name}）`)
+    await evaluate(`window.__nexusCharacter.select('${target.id}')`)
+    await sleep(2500)
+    const after = await evaluate(`(() => ({
+      marker: window.__hotSwapMarker ?? null,
+      kind: window.__nexusStage ? window.__nexusStage.kind : null,
+      pack: window.__nexusStage && window.__nexusStage.pack ? window.__nexusStage.pack.id : null,
+      canvases: document.querySelectorAll('canvas').length,
+    }))()`)
+    const kept = typeof after.marker === 'string'
+    const swapped = after.pack === target.id
+    console.log(
+      `  切换后：kind=${after.kind} pack=${after.pack} canvas 数=${after.canvases}` +
+        `｜角色真的换了 ${swapped ? '✅' : '❌'}｜页面标记${kept ? '还在 ⇒ 没有刷新页面 ✅' : '没了 ⇒ 发生了刷新 ❌'}`,
+    )
+    await shoot(`after-switch-${target.kind}`)
+    // 切回去，别把用户的选择改掉
+    const back = packs.find((p) => p.kind === before) ?? packs[0]
+    await evaluate(`window.__nexusCharacter.select('${back.id}')`)
+    await sleep(2000)
+  }
+
   shots.mouthClosed = closed?.path
   shots.mouth1 = half?.path
   shots.mouth2 = wide?.path

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IDLE_LABELS,
   LLM_PRESETS,
@@ -12,11 +12,12 @@ import {
   type IdleActivity,
 } from '@/core/settings'
 import {
-  CHARACTER_LABELS,
-  loadCharacterKind,
-  saveCharacterKind,
-  type CharacterKind,
-} from '@/core/character/mode'
+  characterState,
+  initCharacter,
+  listCharacterPacks,
+  selectCharacter,
+} from '@/core/character/selection'
+import type { CharacterFeatures, CharacterPack } from '@/core/character/packs'
 import { reconfigureSession, voiceOutput } from '@/core/runtime'
 import { streamChat } from '@/core/agent/llm'
 
@@ -35,26 +36,76 @@ const llmTest = ref('')
 const ttsTest = ref('')
 const testing = ref(false)
 
-/** 角色渲染模式：Live2D 模型 / 立绘差分 */
-const characterKind = ref<CharacterKind>(loadCharacterKind())
-
 /**
- * 待机幅度。和渲染模式不同，这个**不用刷新**：
- * 渲染循环每帧读 `idleRuntime.factor`，改完立刻生效（调起来才不难受）。
+ * 待机幅度。**不用刷新**：渲染循环每帧读 `idleRuntime.factor`，改完立刻生效
+ * （调起来才不难受）。角色包可以在自己的 tuning 里覆盖它。
  */
 const idleActivity = ref<IdleActivity>(loadIdleActivity())
 watch(idleActivity, (v) => setIdleActivity(v))
 
 /**
- * 切换渲染模式。
+ * 角色：从清单里选。
  *
- * 两种渲染器创建的 Pixi 舞台不一样，热切换要重建整个舞台 ——
- * 直接刷新页面最稳，也避免留下半初始化的画布。
+ * ★ 和过去的「渲染方式」不同，这里**不刷新页面** —— 舞台支持热插拔
+ *   （见 CharacterStage.vue 的 mount/unmount）：先建新角色，成功了才销毁旧的，
+ *   失败还会回退。所以正在说话时切角色也不会被打断。
  */
-function onCharacterKindChange() {
-  saveCharacterKind(characterKind.value)
-  window.location.reload()
+const packs = ref<CharacterPack[]>([])
+const characterId = ref('')
+const currentNote = ref('')
+const features = ref<CharacterFeatures | null>(null)
+
+const FEATURE_LABELS: Record<keyof CharacterFeatures, string> = {
+  blink: '眨眼',
+  gaze: '瞳孔跟随',
+  mouthTiers: '嘴型档数',
+  hairSway: '头发飘动',
+  motions: '动作组',
+  expressions: '表情',
 }
+
+const featureText = computed(() => {
+  const f = features.value
+  if (!f) return ''
+  const on: string[] = []
+  if (f.blink) on.push(FEATURE_LABELS.blink)
+  if (f.gaze) on.push(FEATURE_LABELS.gaze)
+  if (f.hairSway) on.push(FEATURE_LABELS.hairSway)
+  if (f.motions) on.push(FEATURE_LABELS.motions)
+  if (f.expressions) on.push(FEATURE_LABELS.expressions)
+  on.push(`${FEATURE_LABELS.mouthTiers} ${f.mouthTiers}`)
+
+  // 缺什么也说出来 —— 免得以后加了功能，用户以为"点了没反应"
+  const off: string[] = []
+  if (!f.blink) off.push('眨眼（缺 eyes_closed.png）')
+  if (!f.gaze) off.push('瞳孔跟随（缺独立眼睛图层）')
+  if (!f.motions) off.push('动作组（需 Live2D 模型）')
+  return on.join('、') + (off.length ? `　缺：${off.join('、')}` : '')
+})
+
+async function onCharacterChange() {
+  try {
+    const state = await selectCharacter(characterId.value)
+    currentNote.value = state.pack.note ?? ''
+    features.value = state.features
+  } catch (err) {
+    currentNote.value = `切换失败：${err instanceof Error ? err.message : String(err)}`
+  }
+}
+
+function syncCharacterUI() {
+  const s = characterState()
+  if (!s) return
+  characterId.value = s.pack.id
+  currentNote.value = s.pack.note ?? ''
+  features.value = s.features
+}
+
+/**
+ * 切渲染模式的旧入口已经没有了 —— 模式现在是**角色的属性**
+ * （`character.json` 里的 kind），选角色即选模式。
+ * 开发期想强制某一种渲染器，用 `?portrait=1` / `?live2d=1`（见 packs.ts）。
+ */
 
 onMounted(() => {
   const llm = loadLLMConfig()
@@ -67,6 +118,12 @@ onMounted(() => {
   ttsURL.value = tts.baseURL
   ttsVoice.value = tts.voice ?? 'default'
   ttsSpeed.value = tts.speed ?? 1
+
+  // 角色清单：面板可能先于舞台打开，所以这里自己初始化一次（幂等）
+  void initCharacter().then(async () => {
+    packs.value = await listCharacterPacks()
+    syncCharacterUI()
+  })
 })
 
 /*
@@ -210,13 +267,17 @@ async function trialTTS() {
           <code>public/portrait/</code>；Live2D 模型放 <code>public/models/</code>。
         </p>
         <label>
-          <span>渲染方式</span>
-          <select v-model="characterKind" @change="onCharacterKindChange">
-            <option v-for="(label, key) in CHARACTER_LABELS" :key="key" :value="key">
-              {{ label }}
+          <span>角色</span>
+          <select v-model="characterId" @change="onCharacterChange">
+            <option v-for="p in packs" :key="p.id" :value="p.id">
+              {{ p.name }}（{{ p.kind === 'portrait' ? '立绘' : 'Live2D' }}）
             </option>
           </select>
         </label>
+        <p v-if="currentNote" class="note">{{ currentNote }}</p>
+        <p v-if="features" class="note">
+          当前能力：{{ featureText }}
+        </p>
         <label>
           <span>待机动作</span>
           <select v-model="idleActivity">
@@ -228,7 +289,12 @@ async function trialTTS() {
         <p class="note">
           待机是永远在跑的动作（呼吸浮动、身体微摆、视线游移），<b>眨眼不受影响</b> ——
           幅度大一点就像在飘，完全关掉又像贴图，按自己看着舒服的调。
-          两种渲染方式都吃这个设置。
+          两种渲染方式都吃这个设置；角色也可以在 <code>character.json</code> 里覆盖。
+        </p>
+        <p class="note">
+          角色清单在 <code>public/characters/index.json</code>：加一条就多一个可切换的角色，
+          <b>切换不用刷新页面</b>（正在说话也不会被打断）。立绘角色的素材放它自己的目录，
+          三张图（<code>body.png</code> / <code>mouth_1.png</code> / <code>eyes_closed.png</code>）就能用。
         </p>
       </section>
 

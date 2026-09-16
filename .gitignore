@@ -21,6 +21,11 @@ public/portrait/*
 !public/portrait/_placeholder/
 !public/portrait/_placeholder/**
 
+# 角色清单要入库（它只是一份配置：角色 id / 名字 / 类型 / 素材目录）
+# 素材本身仍然不入库，见各角色自己的目录
+!public/characters/
+!public/characters/**
+
 # ── 本地素材仓 ──
 # 官方 SDK 原始包、模型压缩包、Cubism 工程源文件（.can3/.cmo3）都放这里。
 # 这些都是「来源可再取、体积大、许可受限」的东西，不进仓库；

@@ -97,8 +97,10 @@ live2d/
 │   ├── core/
 │   │   ├── character/
 │   │   │   ├── types.ts         # CharacterStage / CharacterFrame：两个渲染器的共同接口
+│   │   │   ├── packs.ts         # 角色包：清单、素材探测、能力表、按角色调参
+│   │   │   ├── selection.ts     # 当前角色 + 订阅（热插拔的触发源）
 │   │   │   ├── live2d.ts        # Live2D 渲染器 → 接口适配（口型落点、点击反应）
-│   │   │   └── mode.ts          # 渲染方式的选择与持久化
+│   │   │   └── mode.ts          # 记住上次用的渲染类型（兜底角色用）
 │   │   ├── portrait/            # 立绘（PNGTuber）渲染器
 │   │   │   ├── assets.ts        # 素材加载与校验（缺哪张就降级）
 │   │   │   └── stage.ts         # 图层合成 + 参数语义解释 + 轮廓命中
@@ -122,6 +124,7 @@ live2d/
 │   │       └── session.ts       # 对话编排（历史裁剪 / 逐句回调 / 打断）
 │   └── styles/
 ├── public/
+│   ├── characters/              # 角色清单（入库）：index.json = id/名字/类型/素材目录
 │   ├── lib/                     # Cubism Core 运行时（不入库）
 │   └── models/                  # Live2D 模型（不入库，见下）
 ├── vendor/                      # 本地素材仓：SDK 原始包 / 模型压缩包 / Cubism 工程文件（不入库）
@@ -251,13 +254,38 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 **立绘的完整素材规格见 [`docs/portrait-assets.md`](docs/portrait-assets.md)** —— 要准备哪几张图、
 `portrait.json` 怎么写、差分图怎么做、素材没生效时怎么排查，都在里面。
 
+### 角色是可以插拔的（多个角色并存，切换不用刷新）
+
+角色清单：`public/characters/index.json`。加一个角色 = 加一条 + 把素材放进它自己的目录：
+
+```jsonc
+{
+  "current": "me",
+  "characters": [
+    { "id": "me",   "name": "我的角色", "kind": "portrait", "dir": "portrait" },
+    { "id": "haru", "name": "Haru（官方示例）", "kind": "live2d",
+      "model": "Haru/Haru.model3.json" },
+    // 同一个角色的另一套素材也能并存，用来对比：
+    { "id": "me-alt", "name": "我的角色（备用）", "kind": "portrait", "dir": "portrait-alt",
+      "tuning": { "motion": { "swayDegrees": 0.4 }, "mouth": { "minOpenScale": 0.5 } } }
+  ]
+}
+```
+
+设置 → 角色 里直接切，**不刷新页面**（先建新的、成功了才销毁旧的，失败会自动回退，
+正在说话也不会被打断）。`tuning` 可以按角色覆盖待机幅度、口型映射、口型手感。
+
+能力是**探测出来的**而不是配置里声明的：探测结果（有没有眼差分、几档嘴型、有没有头发图层）
+会显示在设置面板里，以后的视线跟随/头发飘动/表情都先查这张表，缺素材就自动退化 ——
+所以换个角色不会出现"点了没反应"。
+
 两个配套脚本（都不需要人眼盯屏幕）：
 
 | 脚本 | 作用 |
 |---|---|
 | `python/tools/prepare_portrait.py 立绘.png` | 一条命令备好底图：备份原图 → 抠背景 → 报出取景参数 |
 | `python/tools/make_differential.py --base … --variant …` | 拿「AI 改过的整张图」自动做差分图：只取真正改动的像素，框外漂移自动丢弃 |
-| `node tools/verify-portrait.mjs` | 自动验证：报素材加载状态，并逐状态截图供比对（嘴型是否真的换了、对位对不对） |
+| `node tools/verify-portrait.mjs` | 自动验证：素材状态、口型换图/对位、待机漂移、**热插拔**（切角色不刷新页面），都靠截图逐像素比 |
 
 两条路共用同一套交互层（悬浮浮现、点击反应、口型、待机），区别只是渲染器：
 `core/portrait/stage.ts` 与 `core/live2d/engine.ts` 实现同一个 `CharacterStage` 接口

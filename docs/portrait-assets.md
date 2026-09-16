@@ -200,6 +200,27 @@ cd python
 自己用的时候**建议先不写** —— 不写就按底图自动推导取景/命中区，实测够用；
 只有推导出来的取景不满意（比如头顶留白太多）才需要写一份覆盖。
 
+### 按角色覆盖参数（`public/characters/index.json` 里的 `tuning`）
+
+同一个角色如果待机太飘、或者立绘振幅偏小导致嘴张不开，不用改代码，也不用改
+`portrait.json`（那个是**素材**的属性），在角色清单里按角色覆盖：
+
+```jsonc
+{
+  "id": "me", "name": "我的角色", "kind": "portrait", "dir": "portrait",
+  "tuning": {
+    "idleFactor": 0.5,                                   // 待机幅度倍率（覆盖设置里的全局档位）
+    "motion": { "bobPercent": 0.004, "swayDegrees": 0.8, "breatheScale": 0.004 },
+    "mouth":  { "closedLevel": 0.1, "minOpenScale": 0.35 },  // 嘴：更容易闭 / 微张更明显
+    "lipsync": { "gain": 1.6, "attackMs": 45, "releaseMs": 110 }  // 口型手感
+  }
+}
+```
+
+优先级：`tuning` > `portrait.json` 的 `motion` > 内置默认。
+清单里还能放多个角色（甚至同一个角色的两套素材并存），设置 → 角色 里切换，**不用刷新页面**。
+
+
 ---
 
 ## 五、怎么看效果 / 怎么排查

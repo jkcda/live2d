@@ -1,11 +1,17 @@
 /**
- * 角色渲染模式的选择与持久化。
+ * 角色渲染模式。
  *
  *   live2d   —— 用 Live2D 模型（有表情、动作、立体转头）
  *   portrait —— 用立绘差分图（PNGTuber：换图式口型/眨眼，成本极低）
  *
- * 存 localStorage（与其它设置一致，见 settings.ts 的写入时机说明）。
- * 开发期可以用 ?portrait=1 / ?live2d=1 临时切换，便于对比。
+ * ★ 现在模式是**角色的属性**，不是独立设置：清单里每个角色自带 `kind`
+ *   （见 `public/characters/index.json` 与 `core/character/packs.ts`）。
+ *   这个模块只负责记住「上次用的是哪一种」，供两处使用：
+ *     · 没有 characters/index.json 时的兜底角色（老安装不能因为升级就瘸掉）；
+ *     · 以后要按类型给用户推荐角色时的默认值。
+ *
+ * 开发期想强制某种渲染器：`?portrait=1` / `?live2d=1`（挑该类型的第一个角色），
+ * 或 `?pack=<id>` 直接指定角色 —— 逻辑在 packs.ts 的 resolveCurrentPack。
  */
 
 export type CharacterKind = 'live2d' | 'portrait'
@@ -13,12 +19,6 @@ export type CharacterKind = 'live2d' | 'portrait'
 const KEY = 'nexus.character.kind'
 
 export const DEFAULT_CHARACTER_KIND: CharacterKind = 'live2d'
-
-/** 各模式的默认入口（模型配置在 CharacterStage.vue 顶部，立绘目录固定为 public/portrait） */
-export const CHARACTER_LABELS: Record<CharacterKind, string> = {
-  live2d: 'Live2D 模型',
-  portrait: '立绘差分（PNGTuber）',
-}
 
 export function loadCharacterKind(): CharacterKind {
   try {
@@ -35,14 +35,4 @@ export function saveCharacterKind(kind: CharacterKind): void {
   } catch (err) {
     console.warn('[character] 保存渲染模式失败', err)
   }
-}
-
-/** 实际生效的模式：开发期的 query 参数优先（方便对比两种渲染器） */
-export function resolveCharacterKind(): CharacterKind {
-  if (import.meta.env.DEV) {
-    const q = new URLSearchParams(window.location.search)
-    if (q.has('portrait')) return 'portrait'
-    if (q.has('live2d')) return 'live2d'
-  }
-  return loadCharacterKind()
 }
