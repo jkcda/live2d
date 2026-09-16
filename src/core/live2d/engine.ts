@@ -32,6 +32,35 @@ import { ensureCubismCore } from './cubism'
  */
 interface CoreModelLike {
   setParameterValueById(id: string, value: number, weight?: number): void
+  setParameterValueByIndex?(index: number, value: number, weight?: number): void
+  /** 框架内部持有的 Core 原生模型 —— 参数 ID 表只有这里拿得到正确顺序 */
+  _model?: { parameters?: { ids?: string[] } }
+}
+
+/**
+ * 参数名 → 索引表。
+ *
+ * ★ 为什么不能直接用 coreModel.setParameterValueById(name, value)：
+ *
+ *   Core 6（SDK for Web 5-r.5）下引擎自己的 ID 查询是坏的 ——
+ *   `getParameterIndex('ParamMouthOpenY')` 返回 **147**，而这个模型只有 138 个参数。
+ *   于是 setParameterValueById 写到一个越界槽位，被 Float32Array **静默丢弃**：
+ *   不报错、不警告，只是「呼吸 / 眨眼 / 视线游移 / 口型怎么都不动」。
+ *
+ *   更阴险的是画面上照旧有东西在动 —— 那是引擎自带的效果链
+ *   （breathDepth / eyeBlink / autoFocus），它们用构造时预先解析好的索引写，
+ *   所以不受这个 bug 影响。看起来一切正常，实际我们的参数一个都没落地。
+ *
+ *   走 setParameterValueByIndex 是实测有效的路径（_parameterValues 就是 Core 的内存视图，
+ *   索引写入立即反映到渲染）。
+ */
+function buildParameterIndex(core: CoreModelLike | null): Map<string, number> {
+  const map = new Map<string, number>()
+  const ids = core?._model?.parameters?.ids
+  if (Array.isArray(ids)) {
+    for (let i = 0; i < ids.length; i++) map.set(ids[i], i)
+  }
+  return map
 }
 
 export interface ModelHandle {
@@ -120,19 +149,76 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
   })
   host.appendChild(app.canvas)
 
-  const model = await Model.from(opts.url, { anchorMode: 'canvas' })
+  const model = await Model.from(opts.url, {
+    anchorMode: 'canvas',
+    /*
+     * 关掉引擎自带的效果链 —— 它们和「程序化待机 + 振幅口型」抢同一批参数。
+     *
+     * 尤其 autoFocus：指针一动它就把头转到 ParamAngleX ±30°；
+     * 默认 breathDepth=1 又会叠加 ±15° 的全身摆动。
+     * 两个加起来，角色看上去就是「一直在大幅摇晃」——
+     * 而按设计，待机动作应该由 IdleAnimator 生成（±4° 微摆）。
+     *
+     * 这三项关掉后，待机与口型的参数只有我们一个写入方。
+     */
+    eyeBlink: false,
+    breathDepth: 0,
+    autoFocus: false,
+
+    /*
+     * 关掉「自动播放待机动作」。
+     *
+     * 引擎默认拿模型 Idle 动作组里的动作**无限循环**播放
+     * （motionManager.update() 里那句 startRandomMotion(groups.idle, IDLE)）。
+     * 而模型作者放进 Idle 组的往往不是待机动作，而是一整段演出 ——
+     * miara 的 Idle 组是 Scene1/2/3，曲线里带 ParamMoveX / ParamAllX / 双腿 / 双臂，
+     * 于是角色会一直在原地走来走去，还会盖掉我们的口型。
+     *
+     * 指到一个不存在的组名即可：startRandomMotion 找不到定义就返回 false，
+     * 不抛异常。**显式播放不受影响** —— playMotion('Tap') 之类照常能用，
+     * 因为那条路是调用方自己给组名的。
+     */
+    idleMotionGroup: '__nexus_no_auto_idle__',
+  })
   app.stage.addChild(model)
 
   const core = resolveCoreModel(model)
+  const paramIndex = buildParameterIndex(core)
+
+  /** 按索引写核心参数；索引表拿不到时退回按 ID 写（老 Core 上那条是通的） */
+  const warnedParams = new Set<string>()
+  const writeParam = (name: string, value: number): void => {
+    if (!core) return
+    const index = paramIndex.get(name)
+
+    if (index !== undefined && typeof core.setParameterValueByIndex === 'function') {
+      core.setParameterValueByIndex(index, value)
+      return
+    }
+
+    // 「静默丢参数」正是这个文件里两次翻车的原因，开发期必须吵出来。
+    // 只在索引表建起来了（说明模型参数表读得到）时才算「真的没这个参数」，
+    // 否则老 Core 走兜底路径会误报。
+    if (
+      import.meta.env.DEV &&
+      paramIndex.size > 0 &&
+      index === undefined &&
+      !warnedParams.has(name)
+    ) {
+      warnedParams.add(name)
+      console.warn(`[live2d] 模型没有参数 ${name}，写入被忽略`)
+    }
+    core.setParameterValueById(name, value)
+  }
 
   const handle: ModelHandle = {
     setParam(name, value) {
-      core?.setParameterValueById(name, value)
+      writeParam(name, value)
     },
     setParams(params) {
       if (!core) return
       for (const name of Object.keys(params)) {
-        core.setParameterValueById(name, params[name])
+        writeParam(name, params[name])
       }
     },
     playMotion(group, index) {
@@ -143,10 +229,47 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
     },
   }
 
+  /*
+   * 开发期调试钩子。
+   *
+   * 为什么留着：参数写入这条路是**静默失败**的 —— core 拿不到时 setParams 直接
+   * return，界面上完全看不出来（角色照样在眨眼呼吸，因为那是引擎自带的效果）。
+   * 排查「口型不动」这类问题时，必须能直接把 core / model 掏出来看。
+   * 生产构建会被 import.meta.env.DEV 摇掉。
+   */
+  if (import.meta.env.DEV) {
+    Object.assign(handle as unknown as Record<string, unknown>, {
+      debugCore: core,
+      debugModel: model,
+    })
+  }
+
+  /*
+   * 取景基准用**画布**尺寸（originalWidth/Height），不是 model.width/height。
+   *
+   * 两条理由，都是踩出来的：
+   *
+   * ① model.width / height 含当前缩放（内容包围盒 × scale），拿它们算比例会形成正反馈：
+   *      第一次 layout → 算出 0.41，缩放生效；
+   *      第二次 layout → model.height 已经是 878，于是算出 1.0，又变回原始尺寸；
+   *    最终停在哪个值只取决于 layout() 被调用了几次（ResizeObserver 挂载时就调一次）。
+   *    实测停在 1：模型保持 1562×2144 的原始尺寸，而视口只有 1200×878，
+   *    锚点又是「底部居中」，屏幕上**只剩两条腿**。
+   *
+   * ② anchor 锚的是**画布**边界。若缩放按内容包围盒算、位置按画布算，
+   *    两者差多少内容就偏出去多少 —— miara 的画布底部有一段水面场景，
+   *    内容比画布底边高 125.7 单位，于是头顶被切掉 52px。
+   *
+   * 两者都统一到画布上，layout() 才既是幂等的、又是对齐的。
+   */
+  const naturalWidth = model.internalModel.originalWidth
+  const naturalHeight = model.internalModel.originalHeight
+
   const layout = (width: number, height: number) => {
     if (width <= 0 || height <= 0) return
+    if (naturalWidth <= 0 || naturalHeight <= 0) return
     const fit = opts.fitRatio ?? 1
-    const scale = Math.min(width / model.width, (height * fit) / model.height)
+    const scale = Math.min(width / naturalWidth, (height * fit) / naturalHeight)
     model.scale.set(scale)
     model.anchor.set(0.5, 1)
     model.position.set(width / 2, height)

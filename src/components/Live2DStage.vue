@@ -10,8 +10,12 @@ import { audioPlayer } from '@/core/runtime'
  * 模型不随仓库分发（受 Live2D 授权条款限制）。
  * 留空则自动探测 public/models/ 下的常见命名；
  * 想固定某个模型就填相对路径，例如 'Haru/Haru.model3.json'。
+ *
+ * 当前指向 miara（Cubism 5 导出的 runtime 结构）。
+ * 注意它的 .model3.json 里声明了 Groups.LipSync → ParamMouthOpenY，
+ * 这是口型驱动的落点，换模型时必须确认新模型也有这个参数。
  */
-const EXPLICIT_MODEL = ''
+const EXPLICIT_MODEL = 'miara_ja/runtime/miara_pro_t04.model3.json'
 
 const host = ref<HTMLElement | null>(null)
 const status = ref('模型加载中…')
@@ -89,6 +93,13 @@ onMounted(async () => {
 
     status.value = ''
     rafId = requestAnimationFrame(frame)
+
+    // 开发期调试钩子：自动化脚本靠它读到舞台 / 口型 / 音频的真实状态
+    if (import.meta.env.DEV) {
+      Object.assign(window as unknown as Record<string, unknown>, {
+        __nexusStage: { stage, idle, lipsync, audioPlayer },
+      })
+    }
 
     resizeObserver = new ResizeObserver(() => {
       if (stage && el) stage.layout(el.clientWidth, el.clientHeight)

@@ -22,6 +22,57 @@ declare global {
   }
 }
 
+/* ──────────────────────────────────────────────────────────────
+ * Core 6 兼容补丁
+ *
+ * Cubism Core 6（随 SDK for Web 5-r.5 分发）改了 API：
+ * `Model.renderOrders` 变成私有字段，公开入口是 `model.getRenderOrders()`。
+ * 但渲染引擎（untitled-pixi-live2d-engine 1.3.5，自称支持 Cubism 2–5）
+ * 仍按 Core 5 的字段名去读 `model.drawables.renderOrders`。
+ *
+ * 后果很有迷惑性：模型**加载成功**（moc3 / 贴图 / physics 全部 200，
+ * 应用自己的 status 也清空了），但每帧绘制都在 doDrawModel 里
+ * `renderOrder[i]` 抛 TypeError —— 画布从始至终是空的，只有 console 里有异常。
+ *
+ * 所以加载 Core 之后必须立刻把新方法挂回旧字段名。纯字段搬迁，语义一致：
+ * getRenderOrders() 返回的就是长度等于 drawableCount 的 Int32Array。
+ * ────────────────────────────────────────────────────────────── */
+
+interface CoreModelLike {
+  drawables?: { renderOrders?: unknown }
+  getRenderOrders?: () => unknown
+}
+
+interface CoreLike {
+  Model?: { fromMoc?: (moc: unknown) => CoreModelLike }
+}
+
+let coreCompatInstalled = false
+
+function installCoreCompat(core: unknown): void {
+  if (coreCompatInstalled) return
+
+  const ModelClass = (core as CoreLike | undefined)?.Model
+  const originalFromMoc = ModelClass?.fromMoc
+  // 老版本 Core 本来就带 drawables.renderOrders，没什么要补的
+  if (!ModelClass || typeof originalFromMoc !== 'function') return
+
+  ModelClass.fromMoc = function patchedFromMoc(this: unknown, moc: unknown) {
+    const model = originalFromMoc.call(this, moc)
+    const drawables = model?.drawables
+    if (
+      drawables &&
+      drawables.renderOrders === undefined &&
+      typeof model.getRenderOrders === 'function'
+    ) {
+      drawables.renderOrders = model.getRenderOrders()
+    }
+    return model
+  }
+
+  coreCompatInstalled = true
+}
+
 /** 正在进行中的加载，避免并发重复注入 */
 let pending: Promise<void> | null = null
 
@@ -42,6 +93,7 @@ function missingMessage(): string {
  */
 export function ensureCubismCore(): Promise<void> {
   if (typeof window !== 'undefined' && window.Live2DCubismCore) {
+    installCoreCompat(window.Live2DCubismCore)
     return Promise.resolve()
   }
   if (pending) return pending
@@ -53,6 +105,7 @@ export function ensureCubismCore(): Promise<void> {
 
     script.onload = () => {
       if (window.Live2DCubismCore) {
+        installCoreCompat(window.Live2DCubismCore)
         resolve()
       } else {
         pending = null
