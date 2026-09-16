@@ -1,13 +1,17 @@
 """SenseVoice-Small ASR（FunASR）。
 
-选它的理由：中文识别质量强、延迟低、模型小（约 250MB），
+选它的理由：中文识别质量强、延迟低、模型小（约 950MB），
 **CPU 上就能跑到实时**，不需要占 GPU —— GPU 要留给 TTS。
 
 安装：
     pip install -e ".[asr]"
 
-首次运行会自动从 ModelScope 下载模型（约 250MB）。
+首次运行会自动从 ModelScope 下载模型（约 950MB，缓存在 ~/.cache/modelscope）。
 国内网络下 ModelScope 比 HuggingFace 稳，所以走它的默认源。
+
+**注意 funasr 依赖不全时会「能加载、不能推理」**：它自己不声明 torch，
+而且特征提取还需要一个 fbank 后端（torchaudio 或 kaldi-native-fbank）。
+所以 availability() 不只检查 funasr，见下面 `_missing_dependency()`。
 """
 
 from __future__ import annotations
@@ -27,8 +31,33 @@ _MODEL_ID = "iic/SenseVoiceSmall"
 _INSTALL_HINT = (
     "SenseVoice 未安装。执行：\n"
     '  pip install -e ".[asr]"\n'
-    "首次运行会自动下载模型（约 250MB）。"
+    "首次运行会自动下载模型（约 950MB）。"
 )
+
+
+def _missing_dependency() -> str | None:
+    """检查 funasr 之外的必需依赖，齐全时返回 None。
+
+    为什么不能只看 `import funasr`：funasr 装上了但缺 torch 或 fbank 后端时，
+    模型权重照样能加载（`AutoModel` 不报错），直到**第一句话**才在特征提取上炸。
+    那种失败发生在用户开口之后，比启动时就报出来难查得多。
+    """
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        return "缺 torch。执行：" + _INSTALL_HINT
+
+    try:
+        import torchaudio  # noqa: F401
+    except ImportError:
+        try:
+            import kaldi_native_fbank  # noqa: F401
+        except ImportError:
+            return (
+                "缺 fbank 特征后端（torchaudio 或 kaldi-native-fbank 任一个）。执行：\n"
+                '  pip install -e ".[asr]"'
+            )
+    return None
 
 
 class SenseVoiceASR(ASREngine):
@@ -49,6 +78,11 @@ class SenseVoiceASR(ASREngine):
             import funasr  # noqa: F401
         except ImportError:
             return False, _INSTALL_HINT
+
+        missing = _missing_dependency()
+        if missing:
+            return False, missing
+
         return True, f"模型：{self._model_id}（{self._device}）"
 
     async def transcribe(self, pcm: np.ndarray, sample_rate: int) -> str:
