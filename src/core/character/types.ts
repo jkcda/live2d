@@ -31,6 +31,18 @@ export interface CharacterFrame {
   ParamBodyAngleX: number
   /** 口型开合 0~1，来自音频振幅 */
   mouth: number
+  /**
+   * 视线：鼠标在哪，她就往哪看。**-1~1**，负 = 左 / 上。
+   *
+   * ★ 为什么不塞进 ParamAngleX / ParamEyeBallX 里就完事：
+   *   待机幅度可以调到「静止」，而"看鼠标"不该跟着一起被关掉 ——
+   *   两者混在一个参数里就没法分开衰减。所以视线是独立字段，
+   *   由各渲染器自己决定怎么落地：
+   *     Live2D → 瞳孔参数 + 转头
+   *     立绘   → 整体视差位移 + 倾斜（没有瞳孔图层，见 features.gaze）
+   */
+  gazeX: number
+  gazeY: number
 }
 
 /** 渲染器能提供的能力。立绘给不出表情/动作，UI 据此退化 */
@@ -61,6 +73,15 @@ export interface CharacterStage {
 
   /** 屏幕坐标落在哪个命中区（Head / Body …），没定义时返回空数组 */
   hitAreaAt(clientX: number, clientY: number): string[]
+
+  /**
+   * 角色某个部位**在屏幕上的位置**（CSS 像素）。
+   *
+   * 为什么渲染器必须提供它：视线跟随要知道"指针相对于她的脸在哪" ——
+   * 用窗口中心当基准是错的（角色不一定居中，而且不同取景下脸的位置差很多），
+   * 结果就是"看着鼠标但视线偏一边"。只有渲染器自己知道脸画在哪。
+   */
+  anchor(part?: 'head' | 'body'): { x: number; y: number } | null
 
   /** 被点之后的反应。Live2D 播动作/表情，立绘做程序化弹跳/歪头 */
   react(areas: string[]): void

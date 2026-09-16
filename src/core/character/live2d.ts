@@ -18,6 +18,16 @@ export interface Live2DCharacterOptions {
   fitRatio?: number
 }
 
+/**
+ * 视线 → 转头幅度（度）。
+ *
+ * 为什么这么小：Live2D 的 ParamAngleX 标称范围是 ±30°，
+ * 眼睛看到指针就跑满 30° 会像"头被拽着走"；±7° 大约是"转头看一眼"的量。
+ */
+const GAZE_YAW_DEG = 7
+const GAZE_PITCH_DEG = 4.5
+const GAZE_ROLL_DEG = 1.5
+
 export interface Live2DCharacter extends CharacterStage {
   kind: 'live2d'
   /** 调试用：底层舞台与模型句柄 */
@@ -71,10 +81,34 @@ export async function createLive2DCharacter(
       return model.hitAreaAt(clientX, clientY)
     },
 
+    anchor(part = 'head') {
+      // Live2D 只知道脸的位置；问身体就按"脸往下 40% 身高"估
+      const face = raw.faceAnchor()
+      if (part === 'head') return face
+      const rect = raw.app.canvas.getBoundingClientRect()
+      return { x: face.x, y: face.y + (rect.height - (face.y - rect.top)) * 0.45 }
+    },
+
     applyFrame(frame: CharacterFrame) {
-      // 除口型外全部直接写进模型；口型写模型声明的那个参数名
-      const { mouth, ...rest } = frame
-      model.setParams({ ...rest, [mouthParam]: mouth })
+      /*
+       * 视线落到 Live2D 身上是最实的一档：瞳孔真的会动，头也会转 ——
+       * 因为模型自带这两套参数，不需要任何素材。
+       *
+       * 为什么在这里相加而不是在驱动层混好：驱动层要能单独衰减待机
+       * （设置 → 待机动作），而"看鼠标"不该被一起关掉。
+       */
+      const { mouth, gazeX, gazeY, ...rest } = frame
+      model.setParams({
+        ...rest,
+        // 瞳孔：满幅跟随（这是"看"最直接的表现）
+        ParamEyeBallX: gazeX,
+        ParamEyeBallY: gazeY,
+        // 头：跟着转，但幅度要克制 —— 满幅转会像脖子装了电机
+        ParamAngleX: rest.ParamAngleX + gazeX * GAZE_YAW_DEG,
+        ParamAngleY: rest.ParamAngleY - gazeY * GAZE_PITCH_DEG,
+        ParamAngleZ: rest.ParamAngleZ + gazeX * GAZE_ROLL_DEG,
+        [mouthParam]: mouth,
+      })
     },
 
     react(areas: string[]) {

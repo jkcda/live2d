@@ -29,6 +29,20 @@ const ANGLE_X_RANGE = 4
 const ANGLE_Z_RANGE = 1.4
 const BODY_ANGLE_RANGE = 2
 
+/**
+ * 视线跟随的幅度（相对角色高度的比例）。
+ *
+ * 立绘没有瞳孔图层（`features.gaze` 为 false），所以"看"完全靠**整体视差**表现：
+ * 她整个人朝鼠标方向挪一点、再歪一点。这是 PNGTuber 的通行做法，
+ * 效果比想象的强 —— 人眼对"她朝我这边转了"很敏感，对瞳孔那 3 像素反而迟钝。
+ *
+ * 为什么用比例而不是像素：窗口大小差很多（浏览器全屏 vs 桌宠 420×640），
+ * 写死像素在桌宠里会显得幅度巨大。
+ */
+const GAZE_SHIFT_RATIO = 0.014
+const GAZE_LIFT_RATIO = 0.006
+const GAZE_ROLL_DEG = 1.6
+
 /** 低于这个开口度就是「闭嘴」= 不叠任何差分 */
 const DEFAULT_CLOSED_LEVEL = 0.1
 /** 刚开口时的最小缩放：再小就看不出张开了，只剩一条缝 */
@@ -206,6 +220,9 @@ export async function createPortraitStage(
   const pivotX = (content ? content.x + content.width / 2 : 0.5) * canvasW
   const pivotY = (content ? content.y + content.height : 1) * canvasH
   root.pivot.set(pivotX, pivotY)
+  /** 静止时的屏幕位置（renderer 坐标），见 layout 里的说明 */
+  let restX = 0
+  let restY = 0
 
   const layout = (width: number, height: number) => {
     if (width <= 0 || height <= 0) return
@@ -215,6 +232,14 @@ export async function createPortraitStage(
     root.scale.set(scale)
     // 锚在底边居中：与 Live2D 那边的取景保持一致
     root.position.set((width - contentWidthPx * scale) / 2, height - (canvasH - (content?.y ?? 0) * canvasH) * scale)
+    /*
+     * 记下「静止时」的位置，供 anchor() 用。
+     * ★ 必须在 layout 里算、而不是拿 root.position 现读：
+     *   root.position 每帧都被待机和视线改，用它当视线基准会形成**负反馈**
+     *   （她朝鼠标挪 → 相对角度变小 → 挪得更少），表现是"幅度比预期小、还发黏"。
+     */
+    restX = (width - contentWidthPx * scale) / 2 + pivotX * scale
+    restY = height - (canvasH - (content?.y ?? 0) * canvasH) * scale + pivotY * scale
   }
 
   /*
@@ -252,6 +277,7 @@ export async function createPortraitStage(
     // 呼吸：上下浮动 + 轻微放大
     const bob = -breath * motion.bobPercent * contentHeightPx
     const breathe = 1 + breath * motion.breatheScale
+    const s = scale * breathe
     // 头部偏转：归一化 → 位移/旋转（单位是「度」，Pixi 用弧度）
     const yaw = frame.ParamAngleX / ANGLE_X_RANGE
     const tilt = frame.ParamAngleZ / ANGLE_Z_RANGE
@@ -274,16 +300,29 @@ export async function createPortraitStage(
     }
 
     /*
+     * 视线视差：整个人朝鼠标方向挪 + 歪一点。
+     * 位移量按角色高度取比例，所以浏览器全屏和桌宠小窗看起来幅度一致。
+     */
+    const gazeX = frame.gazeX ?? 0
+    const gazeY = frame.gazeY ?? 0
+    const gazeShift = gazeX * GAZE_SHIFT_RATIO * contentHeightPx * s
+    const gazeLift = gazeY * GAZE_LIFT_RATIO * contentHeightPx * s
+
+    /*
      * 位置 = 基准位 + 缩放后支点的偏移。
      * 因为设了 pivot，Pixi 画的是 position + R·S·(local - pivot)，
      * 所以要把「支点本身也应落在基准位」这件事补回来，否则一设 pivot 整个角色会跳走。
      */
-    const s = scale * breathe
     root.position.set(
-      (viewW - contentWidthPx * s) / 2 + yaw * 0.012 * contentWidthPx * s + extraX + pivotX * s,
-      viewH - (canvasH - (content?.y ?? 0) * canvasH) * s + bob + extraY + pivotY * s,
+      (viewW - contentWidthPx * s) / 2 +
+        yaw * 0.012 * contentWidthPx * s +
+        extraX +
+        pivotX * s +
+        gazeShift,
+      viewH - (canvasH - (content?.y ?? 0) * canvasH) * s + bob + extraY + pivotY * s - gazeLift,
     )
-    root.rotation = ((tilt * motion.swayDegrees + lean * 0.6 + extraRot) * Math.PI) / 180
+    root.rotation =
+      ((tilt * motion.swayDegrees + lean * 0.6 + extraRot + gazeX * GAZE_ROLL_DEG) * Math.PI) / 180
     root.scale.set(s, s)
 
     // 前发比身体动得多一点，看起来有惯性
@@ -319,6 +358,30 @@ export async function createPortraitStage(
     }
   }
 
+  /**
+   * 脸（或身体）在屏幕上的位置。
+   *
+   * 取命中区的中心 —— 命中区是从轮廓宽度剖面自动推出来的（脖子分界），
+   * 所以不同立绘不用配坐标，脸在哪它就在哪。
+   * 注意要跟着当前变换走：root 有位移/缩放/旋转，直接把画布坐标当屏幕坐标会偏。
+   */
+  const anchor = (part: 'head' | 'body' = 'head'): { x: number; y: number } | null => {
+    const regions = manifest.regions ?? {}
+    const r = part === 'head' ? regions.Head : regions.Body
+    if (!r) return null
+
+    // 画布像素 → 静止状态下的 renderer 坐标（用 restX/restY，不跟当前姿态走，见 layout 的说明）
+    const localX = (r.x + r.width / 2) * canvasW
+    const localY = (r.y + r.height / 2) * canvasH
+    const worldX = restX + (localX - pivotX) * scale
+    const worldY = restY + (localY - pivotY) * scale
+
+    // renderer 坐标 → CSS 像素（autoDensity 下 canvas 的 CSS 尺寸 = 物理尺寸 / resolution）
+    const res = app.renderer.resolution || 1
+    const rect = app.canvas.getBoundingClientRect()
+    return { x: rect.left + worldX / res, y: rect.top + worldY / res }
+  }
+
   const hitTest = (clientX: number, clientY: number): boolean => {
     const rect = app.canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return false
@@ -344,8 +407,7 @@ export async function createPortraitStage(
     return mask.alpha[my * mask.width + mx] > 40
   }
 
-  const hitAreaAt = (clientX: number, clientY: number): string[] => {
-    const rect = app.canvas.getBoundingClientRect()
+  const hitAreaAt = (clientX: number, clientY: number): string[] => {    const rect = app.canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return []
     const nx = (clientX - rect.left) / rect.width
     const ny = (clientY - rect.top) / rect.height
@@ -373,6 +435,7 @@ export async function createPortraitStage(
     applyFrame,
     hitTest,
     hitAreaAt,
+    anchor,
     react(areas: string[]) {
       reactionKind = areas[0] === 'Head' ? 'head' : 'body'
       reactionUntil = performance.now() + 420
@@ -407,6 +470,19 @@ export async function createPortraitStage(
           derivedOpenEyes: assets.derivedOpenEyes,
         },
         mask,
+        /**
+         * 当前的根变换（renderer 坐标）。
+         * 视线跟随这类效果靠截图测量会被界面元素污染（鼠标一上来控制条就浮现），
+         * 直接读数值才是可靠的验收方式。
+         */
+        transform: () => ({
+          x: root.position.x,
+          y: root.position.y,
+          rotationDeg: (root.rotation * 180) / Math.PI,
+          scale: root.scale.x,
+          restX,
+          restY,
+        }),
       },
     })
   }

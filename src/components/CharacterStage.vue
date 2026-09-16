@@ -7,6 +7,7 @@ import { resolveModelUrl } from '@/core/live2d/models'
 import { classify } from '@/core/live2d/reactions'
 import { LipSyncDriver } from '@/core/live2d/lipsync'
 import { IdleAnimator, type IdleFrame } from '@/core/live2d/idle'
+import { GazeDriver } from '@/core/character/gaze'
 import { initCharacter, onCharacterChange, selectCharacter, type PackState } from '@/core/character/selection'
 import { idleRuntime } from '@/core/settings'
 import { audioPlayer } from '@/core/runtime'
@@ -66,6 +67,8 @@ const packName = ref('')
 let stage: CharacterStage | null = null
 let idle: IdleAnimator | null = null
 let lipsync: LipSyncDriver | null = null
+/** 视线驱动：鼠标在哪她就往哪看（渲染器无关，见 core/character/gaze.ts） */
+const gaze = new GazeDriver()
 let rafId = 0
 let lastTs = 0
 let resizeObserver: ResizeObserver | null = null
@@ -125,8 +128,35 @@ function frame(ts: number) {
   const idleFrame = idle.update(dt)
   const mouth = lipsync.update(audioPlayer.amplitude(), dt)
 
-  const next: CharacterFrame = { ...dampIdle(idleFrame, idleFactor), mouth }
+  /*
+   * 视线：指针在 → 看向指针；指针离开窗口 → 慢慢失焦（回落曲线见 gaze.ts）。
+   * 基准点是**她的脸在屏幕上的位置**，由渲染器给（用窗口中心算会偏，见 types.ts）。
+   */
+  gaze.aim(pointer, stage.anchor('head'))
+  const g = gaze.update(dt)
+
+  const next: CharacterFrame = {
+    ...dampIdle(idleFrame, idleFactor),
+    mouth,
+    gazeX: g.x,
+    gazeY: g.y,
+  }
   stage.applyFrame(next)
+
+  // 验证脚本要确认「参数真的送到了渲染器」，光看驱动层的值不算
+  if (import.meta.env.DEV) {
+    const dbg = (
+      window as unknown as {
+        __nexusStage?: { lastFrame: CharacterFrame | null; pointer: unknown; anchor: unknown }
+      }
+    ).__nexusStage
+    if (dbg) {
+      dbg.lastFrame = next
+      // 指针和锚点一起留下来：视线不对时，先分清是"算错了"还是"指针根本没更新"
+      dbg.pointer = pointer ? { x: Math.round(pointer.x), y: Math.round(pointer.y) } : null
+      dbg.anchor = stage.anchor('head')
+    }
+  }
 
   /*
    * 悬浮检测：轮廓判定，节流到 ~30Hz。
@@ -276,7 +306,21 @@ async function mount(s: PackState): Promise<void> {
   if (import.meta.env.DEV) {
     // 开发期调试钩子：自动化脚本靠它读到舞台 / 口型 / 音频的真实状态
     Object.assign(window as unknown as Record<string, unknown>, {
-      __nexusStage: { kind: pack.kind, pack, stage, idle, lipsync, audioPlayer, features: s.features },
+      __nexusStage: {
+        kind: pack.kind,
+        pack,
+        stage,
+        idle,
+        lipsync,
+        gaze,
+        audioPlayer,
+        features: s.features,
+        /** 最近一帧参数（验证视线/口型有没有真的送到渲染器） */
+        lastFrame: null as CharacterFrame | null,
+        /** 最近一次指针位置与脸的位置（排查"视线不对"时先看这两个） */
+        pointer: null as { x: number; y: number } | null,
+        anchor: null as { x: number; y: number } | null,
+      },
     })
   }
 }

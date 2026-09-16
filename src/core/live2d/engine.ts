@@ -120,6 +120,14 @@ export interface Stage {
    * 不能退化成矩形判定 —— 角色画布大部分是透明的，矩形判定等于永远命中。
    */
   hitTest(clientX: number, clientY: number): boolean
+  /**
+   * 脸在屏幕上的位置（CSS 像素）。
+   *
+   * 视线跟随要知道"指针相对于她的脸在哪"。用窗口中心当基准是错的：
+   * 模型取景是「底部居中 + 等比缩放」，脸的位置随窗口比例变化，
+   * 结果就是"她在看鼠标，但视线总是偏一边"。
+   */
+  faceAnchor(): { x: number; y: number }
   destroy(): void
 }
 
@@ -129,6 +137,15 @@ export interface CreateStageOptions {
   /** 模型高度占容器高度的比例，默认 1（铺满） */
   fitRatio?: number
 }
+
+/**
+ * 脸在画布高度上的相对位置（从顶部算）。
+ *
+ * 官方示例模型（Haru/Mao/Hiyori…）都是「全身或半身 + 底部对齐」，
+ * 头部大约占上方 1/5。这只是**视线跟随的参考点**，不需要像素级准确：
+ * 差几个百分点只影响"看的方向"的轻微偏差，人眼看不出来。
+ */
+const FACE_Y_RATIO = 0.18
 
 /** 引擎模块缓存。ES 规范规定求值失败的模块会被记住，重复 import 直接抛同一个错。 */
 type EngineModule = typeof import('untitled-pixi-live2d-engine/cubism')
@@ -467,11 +484,27 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
     return pixel[3] > 12
   }
 
+  /*
+   * 脸的位置：模型是「底部居中 + 锚点 (0.5, 1)」摆的，
+   * 所以脸在画布高度约 18% 处（官方示例模型的头部位置）。
+   * 换算到屏幕：先到 renderer 坐标，再除以 resolution 变成 CSS 像素
+   * （autoDensity 开着，canvas 的 CSS 尺寸 = 物理尺寸 / resolution）。
+   */
+  const faceAnchor = () => {
+    const res = app.renderer.resolution || 1
+    const rect = app.canvas.getBoundingClientRect()
+    const scale = model.scale.x || 1
+    const worldX = model.position.x
+    const worldY = model.position.y - naturalHeight * scale * (1 - FACE_Y_RATIO)
+    return { x: rect.left + worldX / res, y: rect.top + worldY / res }
+  }
+
   return {
     app,
     model: handle,
     layout,
     hitTest,
+    faceAnchor,
     destroy() {
       app.destroy(true, { children: true })
     },

@@ -38,7 +38,17 @@ mkdirSync(OUT_DIR, { recursive: true })
 // ────────────────────────────────────────────── 启动宿主
 
 const child = spawn(electron, ['tools/probe-main.cjs', `--remote-debugging-port=${PORT}`], {
-  env: { ...process.env, PROBE_URL: URL_ },
+  env: {
+    ...process.env,
+    PROBE_URL: URL_,
+    /*
+     * 窗口放大一点：视线用例要往四个方向移动鼠标，而角色是**铺满窗口**的，
+     * 脸天然靠近顶部（18% 高度处）。窗口太矮时"鼠标移到脸上面"会撞到控制条，
+     * 指针被判为离开 → 读不到"往上看"。窗口高一些才有余量。
+     */
+    PROBE_WIDTH: argOf('--width', '1000'),
+    PROBE_HEIGHT: argOf('--height', '1400'),
+  },
   stdio: 'inherit',
 })
 
@@ -281,6 +291,132 @@ async function main() {
     }
     return files
   }
+
+  /*
+   * 视线跟随。
+   *
+   * ★ 两个坑都在这段里踩过，注释留着免得再犯：
+   *   1. **不能用截图测**：鼠标一动控制条就浮现，轮廓包围盒立刻被 UI 污染，
+   *      量出来的位移根本不是角色的（第一版得到的"鼠标在右只移了 1.5px"就是这么来的）。
+   *      改成读数值：驱动输出 / 送进渲染器的帧 / 立绘根节点变换，三者要对得上。
+   *   2. **不能注入目标**：渲染循环每帧都会 `aim(pointer)`，注入的值下一帧就被覆盖
+   *      （第一版读到的 (0.48,-0.53) 就是覆盖后剩下的残值）。
+   *      所以要真的派鼠标事件 —— 反正读的是数值，不怕界面浮现。
+   */
+  const gazeRows = []
+  await evaluate(`(window.__nexusRuntime.idleRuntime.factor = 0)`)
+  await sleep(300)
+  /*
+   * 测量期间把控制条藏掉。
+   * 它悬浮才浮现，而"鼠标移到脸上面"这个采样点正好落在它身上 ——
+   * 事件就落在按钮上、指针被判为离开角色，读到的 gazeY 永远是 0。
+   * 我们要测的是角色，不是 UI，所以临时隐藏是合理的。
+   */
+  await evaluate(`(() => {
+    const s = document.createElement('style')
+    s.id = '__gaze_test_hide_ui'
+    s.textContent = '.no-drag, .app-bar, .control-bar { display: none !important; }'
+    document.head.appendChild(s)
+    return true
+  })()`)
+  const anchor = await evaluate(`window.__nexusStage.stage.anchor('head')`)
+  const moveTo = async (x, y) => {
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(x),
+      y: Math.round(y),
+      button: 'none',
+      clickCount: 0,
+    })
+  }
+  /*
+   * 采样点必须**落在窗口里**：第一版用了 ±420 / -260 的偏移，
+   * 结果指针跑到窗口外 → pointerleave → 指针变 null → 读到"鼠标在右却几乎没反应"，
+   * 白排查了一轮。所以按锚点算可用余量，取对称的最大值。
+   */
+  const viewport = await evaluate(`({ w: window.innerWidth, h: window.innerHeight })`)
+  const margin = 8
+  const maxX = Math.min(anchor.x - margin, viewport.w - anchor.x - margin)
+  const maxUp = Math.max(0, anchor.y - margin)
+  const cases = [
+    ['脸原位', 0, 0],
+    ['鼠标左', -maxX, 0],
+    ['鼠标右', maxX, 0],
+    // 上方只留 48px：再往上会被顶部那条 UI 容器吃掉（.stage 不覆盖那里）
+    ['鼠标上', 0, -48],
+    ['鼠标下', 0, 300],
+  ]
+  console.log(`窗口 ${viewport.w}×${viewport.h}，脸的余量：左右 ±${maxX.toFixed(0)}，上方 ${maxUp.toFixed(0)}`)
+  for (const [label, ox, oy] of cases) {
+    await moveTo(anchor.x + ox, anchor.y + oy)
+    await sleep(700) // 平滑时间常数 130ms，700ms 足够收敛
+    const row = await evaluate(`(() => {
+      const s = window.__nexusStage
+      const t = window.__nexusPortrait ? window.__nexusPortrait.transform() : null
+      return {
+        gaze: s.gaze.value(),
+        pointer: s.pointer,
+        anchor: s.anchor,
+        frame: s.lastFrame ? { x: s.lastFrame.gazeX, y: s.lastFrame.gazeY } : null,
+        transform: t,
+      }
+    })()`)
+    gazeRows.push({ label, offset: [ox, oy], ...row })
+  }
+  console.log(`\n视线跟随（待机已置 0，锚点 ${anchor.x.toFixed(0)},${anchor.y.toFixed(0)}）：`)
+  console.log('  鼠标      应用看到的指针      驱动输出        立绘位移           旋转')
+  const base = gazeRows[0]
+  for (const r of gazeRows) {
+    const dx = r.transform && base.transform ? r.transform.x - base.transform.x : 0
+    const dy = r.transform && base.transform ? r.transform.y - base.transform.y : 0
+    const rot = r.transform ? `${r.transform.rotationDeg.toFixed(2)}°` : '?'
+    const p = r.pointer ? `${r.pointer.x},${r.pointer.y}` : 'null'
+    console.log(
+      `  ${r.label}  ${p}`.padEnd(28) +
+        `(${r.gaze.x.toFixed(2)},${r.gaze.y.toFixed(2)})`.padEnd(16) +
+        `Δ(${dx.toFixed(1)},${dy.toFixed(1)}) px`.padEnd(18) +
+        rot,
+    )
+  }
+  const g = (i) => gazeRows[i].gaze
+  const d = (i, axis) => {
+    const b = gazeRows[0].transform
+    const t = gazeRows[i].transform
+    if (!b || !t) return 0
+    return axis === 'x' ? t.x - b.x : t.y - b.y
+  }
+  // 顺序：脸原位 / 左 / 右 / 上 / 下
+  const checks = [
+    ['鼠标在左 → 往左看（gazeX 明显为负）', g(1).x < -0.6],
+    ['鼠标在右 → 往右看（gazeX 明显为正）', g(2).x > 0.6],
+    ['鼠标在下 → 往下看（gazeY 为负）', g(4).y < -0.4],
+    ['往左看 → 整体左移', d(1, 'x') < -3],
+    ['往右看 → 整体右移', d(2, 'x') > 3],
+    ['往下看 → 整体下移', d(4, 'y') > 1],
+    ['驱动输出 = 送进渲染器的值', Math.abs(g(1).x - (gazeRows[1].frame?.x ?? 99)) < 0.02],
+    /*
+     * 「往上看」单独放宽：角色是铺满窗口的，脸固定在 18% 高度处，
+     * 加上顶部那条 UI 容器，鼠标最多只能移到脸上面约 50px ——
+     * 换算出来 gazeY 只有 0.1 左右，而且屏幕位移不到 1px。
+     * 所以只断言"方向是正的"，并把这个限制写出来，不假装它能测满。
+     */
+    [`鼠标在上 → 往上看（受窗口顶部限制，只能到 ${g(3).y.toFixed(2)}）`, g(3).y > 0.08],
+  ]
+  let allOk = true
+  for (const [label, ok] of checks) {
+    if (!ok) allOk = false
+    console.log(`  ${ok ? '✅' : '❌'} ${label}`)
+  }
+  writeFileSync(join(OUT_DIR, 'gaze.json'), JSON.stringify({ anchor, rows: gazeRows }, null, 2))
+  await evaluate(
+    `(() => {
+      document.getElementById('__gaze_test_hide_ui')?.remove()
+      window.__nexusStage.gaze.reset()
+      window.__nexusRuntime.idleRuntime.factor = 1
+      return true
+    })()`,
+  )
+  if (!allOk) console.log('  ⚠ 视线用例有失败项')
 
   await setMouth(0)
   const idleNormal = await idleSeries(1, 'normal')
