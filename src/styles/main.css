@@ -29,3 +29,21 @@ body {
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/*
+ * 浏览器模式。
+ *
+ * 应用本身是给 Electron 透明窗口用的（无背景、浅色文字），
+ * 直接开在浏览器里会白底白字，看起来像没渲染出来。
+ * 这里铺一层棋盘格 —— 既让内容可读，也明确表示「这一块在桌面上是透明的」。
+ */
+body.browser-mode {
+  background-color: #2b2b32;
+  background-image:
+    linear-gradient(45deg, #24242a 25%, transparent 25%),
+    linear-gradient(-45deg, #24242a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #24242a 75%),
+    linear-gradient(-45deg, transparent 75%, #24242a 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}

@@ -11,6 +11,9 @@ const showBar = ref(true)
 const showChat = ref(false)
 const showSettings = ref(false)
 
+/** 有没有 Electron 桥。没有就是浏览器里跑，窗口控制按钮点了也没用，直接不显示。 */
+const isDesktop = Boolean(window.nexus)
+
 onMounted(async () => {
   if (window.nexus) {
     version.value = await window.nexus.version()
@@ -80,9 +83,12 @@ async function quit() {
         <span class="version">v{{ version }}</span>
         <button class="btn" :class="{ on: showChat }" @click="toggleChat">对话</button>
         <button class="btn" :class="{ on: showSettings }" @click="openSettings">设置</button>
-        <button class="btn" @click="togglePassthrough">穿透</button>
-        <button class="btn" @click="hide">隐藏</button>
-        <button class="btn danger" @click="quit">退出</button>
+        <template v-if="isDesktop">
+          <button class="btn" @click="togglePassthrough">穿透</button>
+          <button class="btn" @click="hide">隐藏</button>
+          <button class="btn danger" @click="quit">退出</button>
+        </template>
+        <span v-else class="badge" title="没跑在 Electron 里，窗口控制不可用">浏览器模式</span>
       </div>
     </Transition>
 
@@ -168,6 +174,15 @@ async function quit() {
 .version {
   color: #8a8a92;
   padding-right: 2px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(180, 150, 60, 0.22);
+  border: 1px solid rgba(200, 170, 80, 0.35);
+  color: #d8c07a;
 }
 
 .btn {
