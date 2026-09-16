@@ -21,15 +21,25 @@ cosyvoice = [
     "librosa>=0.10",
 ]
 
-# ASR：FunASR SenseVoice-Small
+# ASR：FunASR SenseVoice-Small。
+# funasr 自己不声明 torch 依赖，而且推理还需要一个 fbank 特征后端 ——
+# 只装 funasr 的话模型能加载，但第一句话就会炸在特征提取上。
 asr = [
     "funasr>=1.1",
     "soundfile>=0.12",
+    "torch>=2.2",
+    "torchaudio>=2.2",  # fbank 后端；也可换成更轻的 kaldi-native-fbank
 ]
 
 # VAD：Silero
 vad = [
     "onnxruntime>=1.18",
+]
+
+# TTS：Windows SAPI（过渡用的真语音，零模型下载）
+# 只有 Windows 能装 —— 其它平台请用 tone 或 cosyvoice
+sapi = [
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 dev = [

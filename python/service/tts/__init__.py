@@ -8,12 +8,18 @@ from .tone import ToneEngine
 
 __all__ = ["TTSEngine", "ToneEngine", "create_engine", "AVAILABLE_ENGINES"]
 
-AVAILABLE_ENGINES = ("tone", "cosyvoice")
+AVAILABLE_ENGINES = ("tone", "sapi", "cosyvoice")
 
 
 def create_engine(name: str | None = None) -> TTSEngine:
     """按名字创建引擎。名字无效时退回 tone —— 开发服务不该因为配错就起不来。"""
     key = (name or settings.engine or "tone").strip().lower()
+
+    if key == "sapi":
+        # Windows 专用的过渡引擎：真语音、零模型下载
+        from .sapi import SapiEngine
+
+        return SapiEngine(sample_rate=settings.sample_rate)
 
     if key == "cosyvoice":
         # 延迟导入：没装 torch 的人不该因为 import 就起不来服务

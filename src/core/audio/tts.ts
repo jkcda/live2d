@@ -107,6 +107,42 @@ export class VoiceOutput {
     }
   }
 
+  /**
+   * 试听一句话。
+   *
+   * 和对话路径走的是同一条链路（合成 → 播放 → 振幅 → 口型），
+   * 区别只有一点：**失败时把服务端给的原因抛出去**。
+   * 对话路径不需要这个 —— 那里服务没起来就静默降级成「只显示文字」，
+   * 但在设置面板里点「试听」却什么都不响、还不说为什么，就没法排查了。
+   */
+  async preview(text: string): Promise<void> {
+    const cfg = this.getConfig()
+    const body = text.trim()
+    if (!body) return
+    if (!cfg.baseURL) throw new Error('没填服务地址')
+
+    this.interrupt()
+
+    const resp = await fetch(`${trimSlash(cfg.baseURL)}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: body, voice: cfg.voice, speed: cfg.speed }),
+      signal: AbortSignal.timeout(30_000),
+    })
+
+    if (!resp.ok) {
+      // FastAPI 把原因放在 {"detail": "..."} 里 —— 引擎未就绪（503）时这句最关键
+      const raw = await resp.text().catch(() => '')
+      throw new Error(`HTTP ${resp.status}${detailOf(raw)}`)
+    }
+
+    const data = await resp.arrayBuffer()
+    if (data.byteLength === 0) throw new Error('服务返回了空音频')
+
+    const buffer = await this.player.context.decodeAudioData(data)
+    await this.player.playBufferAndWait(buffer)
+  }
+
   private ensureController(): AbortController {
     if (!this.controller) this.controller = new AbortController()
     return this.controller
@@ -144,4 +180,16 @@ export class VoiceOutput {
 
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, '')
+}
+
+/** 从 FastAPI 的错误体里抠出 detail，抠不到就返回空串 */
+function detailOf(raw: string): string {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown }
+    if (typeof parsed.detail === 'string') return ` · ${parsed.detail}`
+  } catch {
+    // 不是 JSON，原样带上（截断，别把一屏堆栈塞进界面）
+  }
+  return ` · ${raw.slice(0, 120)}`
 }
