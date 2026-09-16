@@ -49,6 +49,19 @@ TTS 音频块 → AudioContext AnalyserNode → RMS 振幅 → 指数平滑 → 
 呼吸、眨眼、视线游移、头部微摆由 `IdleAnimator` 程序化生成。
 它们连续、随机、永远在跑 —— 从视频提取反而僵硬。
 
+> **必须显式关掉引擎自带的同款效果**，否则它们会和 `IdleAnimator` 抢同一批参数、
+> 而且幅度大得多。见 `src/core/live2d/engine.ts` 里 `Model.from()` 的选项：
+>
+> - **自动播放 Idle 动作组** → 模型作者放进 Idle 组的往往是一整段演出。
+>   miara 的 Idle 组是 `Scene1/2/3`，曲线里带 `ParamMoveX` / `ParamAllX` / 双腿双臂，
+>   结果角色会**一直原地走来走去**，还会盖掉口型。指到一个不存在的组名即可关掉，
+>   显式 `playMotion()` 不受影响。
+> - **`autoFocus` 焦点跟随** → 指针一动就把头转到 `ParamAngleX ±30°`
+> - **`eyeBlink` / `breathDepth`** → 和 IdleAnimator 的眨眼呼吸重复，且 `breathDepth=1`
+>   会叠加 ±15° 的全身摆动
+>
+> 关掉后待机时只有 7 个参数在动（实测），全部落在 IdleAnimator 的设计范围内。
+
 ---
 
 ## 技术栈
@@ -59,7 +72,7 @@ TTS 音频块 → AudioContext AnalyserNode → RMS 振幅 → 指数平滑 → 
 | 前端 | Vue 3 + TypeScript + Vite 8 | |
 | 渲染 | PixiJS 8 + `untitled-pixi-live2d-engine` | 支持 Cubism 2–5，内置 lip-sync 与并行动作混合 |
 | 构建 | vite-plugin-electron | 主进程 / preload / 渲染进程统一构建 |
-| 推理服务 | Python（独立进程，待建） | CosyVoice 2 (TTS) + SenseVoice (ASR) + Silero VAD |
+| 推理服务 | Python（独立进程：FastAPI + WebSocket） | CosyVoice 2 (TTS) + SAPI (Windows 过渡 TTS) + SenseVoice (ASR) + Silero VAD |
 
 **为什么推理层用 Python 而不是 TS**：TTS / ASR / VAD 的生态在 Python，没有替代品。
 但它被隔离成独立进程，通过 HTTP + WebSocket 通信，不影响前端技术栈。
@@ -104,6 +117,7 @@ live2d/
 ├── public/
 │   ├── lib/                     # Cubism Core 运行时（不入库）
 │   └── models/                  # Live2D 模型（不入库，见下）
+├── vendor/                      # 本地素材仓：SDK 原始包 / 模型压缩包 / Cubism 工程文件（不入库）
 ├── python/                      # 推理服务（TTS / VAD / ASR）
 │   ├── service/
 │   │   ├── main.py              # FastAPI 路由（HTTP + WS）
@@ -162,6 +176,22 @@ public/lib/
 > **为什么不从 npm 装**：社区里存在若干第三方再分发包，但它们的来源和授权状态都无法确认（有的甚至给 Live2D 的专有二进制标了宽松开源协议）。这个文件受 Live2D SDK 授权条款约束，请走官方渠道，使用即表示接受其条款。
 
 缺这个文件时不会白屏 —— 控制台会给出明确提示和下载地址。
+
+> **⚠️ Core 6 与渲染引擎不兼容，我们踩了两个坑**
+>
+> SDK for Web `5-r.5` 带的是 **Cubism Core 6.0.1**，而引擎
+> `untitled-pixi-live2d-engine@1.3.5` 只声明支持 Cubism 2–5。实测有两处 API 断裂：
+>
+> | 断裂点 | 表现 | 处理位置 |
+> |---|---|---|
+> | `Model.renderOrders` 变成私有，公开入口改为 `getRenderOrders()` | 每帧在 `doDrawModel` 抛 `TypeError ... reading '0'`，**画布始终空白**，而界面不报错、资源全部 200 | `src/core/live2d/cubism.ts` 把新方法挂回 `drawables.renderOrders` |
+> | 参数 ID → 索引的查表是错的（`getParameterIndex('ParamMouthOpenY')` 返回 **147**，模型只有 138 个参数） | `setParameterValueById` 写进越界槽位，被 `Float32Array` **静默丢弃** —— 呼吸 / 眨眼 / 视线 / **口型全都不动**；而引擎自带效果照旧在动，看上去一切正常 | `src/core/live2d/engine.ts` 自己从 Core 的 ID 表建索引，改走 `setParameterValueByIndex` |
+>
+> 两处都是**静默失败**，所以排查时先问这两句：
+> 画布是空的 → 查第一行；角色在动但你的参数不生效 → 查第二行。
+>
+> **更省事的选择**：用 Cubism Core 5.x（早于 `5-r.5` 的 SDK），两处补丁都不需要。
+> 继续用 Core 6 的话，这两处补丁别删。
 
 ### 第二步：模型资源
 
@@ -222,13 +252,21 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 - [x] Python 推理服务（`/health` `/voices` `/tts`，含零依赖的 tone 引擎）
 - [x] VAD（`WS /stream` 通道 + 零依赖能量法，实测打断延迟 ~96ms）
 - [x] 语音输入闭环（麦克风采集 → VAD → 打断 → ASR → 送 LLM）
+- [x] Windows SAPI 过渡引擎（真语音，不用等 CosyVoice 装好）
 - [ ] 切到 CosyVoice 2 真实 TTS
-- [ ] 启用 SenseVoice ASR（`NEXUS_ASR_ENGINE=sensevoice`）
+- [x] 启用 SenseVoice ASR（`NEXUS_ASR_ENGINE=sensevoice`）
 
 > **现在就能验证的完整链路**：起 `python -m service.main`（默认 tone 引擎，不需要 GPU 和模型），
 > 再起 `pnpm dev:web`，填个 API key，打开麦克风 —— 说话时她会立刻闭嘴（barge-in），
-> 出文字后她会回答并且口型跟着动。
-> 只差 ASR 那一步需要装 SenseVoice 才能真正听懂你说了什么。
+> 说完她会把话识别成文字送进 LLM，回答时口型跟着动。
+> 装上 ASR 后这条链路才是闭环的：`pip install -e ".[asr]"` + `NEXUS_ASR_ENGINE=sensevoice`。
+>
+> **想先听真语音**（Windows，不用下模型、不用配 key）：
+> `pip install -e ".[sapi]"` + `NEXUS_TTS_ENGINE=sapi`，
+> 然后「设置 → 语音服务 → 试听」。
+>
+> 想不开口就验证「麦克风 → VAD → ASR」这一段，可以拿系统 TTS 合成的语音喂 `/stream`
+> （Windows 上是 `System.Speech` 的 Huihui zh-CN），实测能原样识别回来。
 
 ## 后续阶段
 

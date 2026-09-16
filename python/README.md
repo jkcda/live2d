@@ -117,7 +117,20 @@ GPT-SoVITS 音色相似度更高、中文生态最完善（45k star），但**�
 | 引擎 | 依赖 | 说明 |
 |---|---|---|
 | `none`（默认） | 无 | 不启用 |
-| `sensevoice` | `pip install -e ".[asr]"` | FunASR SenseVoice-Small，约 250MB，**CPU 可实时** |
+| `sensevoice` | `pip install -e ".[asr]"` | FunASR SenseVoice-Small，权重约 950MB，**CPU 可实时** |
+
+**依赖不只是 funasr**：funasr 自己不声明 torch，而且特征提取还需要一个 fbank
+后端（torchaudio 或 kaldi-native-fbank）。缺了这两样，模型权重照样能加载，
+但要等到**第一句话**才炸在 fbank 上 —— 所以 `availability()` 会一并检查，
+`/health` 的 `asr.detail` 会直接告诉你还缺什么。
+
+首次运行从 ModelScope 下载权重到 `~/.cache/modelscope`。实测（i7-12650H，CPU）：
+
+| 环节 | 耗时 |
+|---|---|
+| 加载权重（已缓存） | 3.7s |
+| 首句权重下载（一次性） | ~107s |
+| 识别 1.2s 音频 | 0.25s |
 
 **ASR 不可用是合法状态，不是错误。** 没有它，VAD 和打断依然工作，
 只是用户说的话进不了 LLM。所以 `/health` 会如实报告 `asr_ready: false`，
@@ -132,7 +145,26 @@ GPU 要留给 TTS，所以 ASR 默认跑 CPU（`NEXUS_ASR_DEVICE` 可改）。
 | 引擎 | 依赖 | 用途 |
 |---|---|---|
 | **`tone`**（默认） | 无（只要 numpy） | **开发用**。按文本生成带音节节奏的类人声波形，用来验证整条链路 |
-| **`cosyvoice`** | torch + 模型权重 | 真实 TTS，支持零样本音色克隆 |
+| **`sapi`** | `pip install -e ".[sapi]"`（仅 Windows） | **过渡用的真语音**。零模型下载，系统音色，语气平淡 |
+| **`cosyvoice`** | torch + 模型权重 | 正式音色，支持零样本克隆与情感指令 |
+
+### 为什么要有 `sapi`
+
+真语音和「像不像在说话」是两件事。`tone` 的嗡嗡声能验证「有没有声音」，
+但验证不了韵律、停顿、以及口型跟真实语音对不对得上 —— 那些得有声调、有辅音的声音才看得出来。
+
+SAPI 的定位就是**在 CosyVoice 装好之前先把这条链路用真语音跑通**：
+
+| | 实测 |
+|---|---|
+| 整句合成耗时 | 1.53s 音频 → **0.033s**（RTF 0.02） |
+| 输出格式 | 22.05kHz / 16-bit / 单声道（**实际格式从产出文件读回上报**，不假设） |
+| 中文音色 | 自动优先挑 `zh-CN`，不挑的话系统默认可能是英文音色，念中文会静默跳过 |
+
+写文件流不受实时播放节流，所以它比实时快几十倍 —— 短板不是延迟，是**只有 Windows、音色一般、不能克隆**。
+
+**一个坑**：`voice` 传 `default` 时，系统默认音色很可能是英文的（比如 Zira）。
+拿它念中文不会报错，只是**不出声** —— 看起来像引擎坏了。所以 `_pick_voice()` 会先找 `zh-CN`。
 
 ### 为什么默认是 tone
 
@@ -184,7 +216,15 @@ uv sync
 python -m service.main        # 默认监听 127.0.0.1:8765
 ```
 
-装真实 TTS：
+想马上听到真语音（Windows，不用下任何模型）：
+
+```bash
+pip install -e ".[sapi]"
+NEXUS_TTS_ENGINE=sapi python -m service.main
+# 前端「设置 → 语音服务 → 试听」即可，不需要配 LLM key
+```
+
+装正式音色：
 
 ```bash
 pip install -e ".[cosyvoice]"
@@ -199,7 +239,7 @@ NEXUS_TTS_ENGINE=cosyvoice python -m service.main
 |---|---|---|
 | `NEXUS_HOST` | `127.0.0.1` | 监听地址 |
 | `NEXUS_PORT` | `8765` | 监听端口（改了要同步改前端的「服务地址」） |
-| `NEXUS_TTS_ENGINE` | `tone` | `tone` / `cosyvoice` |
+| `NEXUS_TTS_ENGINE` | `tone` | `tone` / `sapi`（Windows）/ `cosyvoice` |
 | `NEXUS_TTS_VOICE` | `default` | 默认音色 |
 | `NEXUS_SAMPLE_RATE` | `24000` | TTS 输出采样率 |
 | `NEXUS_VAD_ENGINE` | `energy` | `energy` / `silero` |
