@@ -54,6 +54,16 @@ class Settings:
     cosyvoice_model_dir: str
     cosyvoice_load_on_start: bool
 
+    # ---- VAD ----
+    # energy = 零依赖能量法（默认）；silero = 更准，需 onnxruntime + 模型
+    vad_engine: str
+
+    # ---- ASR ----
+    # none = 不启用（默认）；sensevoice = FunASR SenseVoice-Small
+    # 不启用时 VAD 与打断依然工作，只是语音进不了 LLM
+    asr_engine: str
+    asr_device: str
+
     @classmethod
     def from_env(cls) -> "Settings":
         origins = _env("NEXUS_CORS_ORIGINS", "*")
@@ -66,6 +76,9 @@ class Settings:
             sample_rate=_env_int("NEXUS_SAMPLE_RATE", 24000),
             cosyvoice_model_dir=_env("NEXUS_COSYVOICE_DIR", ""),
             cosyvoice_load_on_start=_env("NEXUS_COSYVOICE_WARMUP", "0") == "1",
+            vad_engine=_env("NEXUS_VAD_ENGINE", "energy").strip().lower(),
+            asr_engine=_env("NEXUS_ASR_ENGINE", "none").strip().lower(),
+            asr_device=_env("NEXUS_ASR_DEVICE", "cpu").strip().lower(),
         )
 
 

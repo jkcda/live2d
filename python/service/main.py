@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from .asr import create_asr
 from .config import settings
+from .stream import StreamSession
 from .tts import AVAILABLE_ENGINES, create_engine
+from .vad import create_vad
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +49,10 @@ app.add_middleware(
 
 engine = create_engine()
 
+# VAD 每个连接一个实例 —— 它的噪声底是逐会话自适应的，共享会互相污染
+_vad_probe = create_vad()
+_asr = create_asr()
+
 
 # ---------------------------------------------------------------- schemas
 
@@ -67,15 +74,32 @@ async def health() -> dict:
     前端据此显示「连不上服务」还是「服务在线但引擎不可用」，
     所以这里永远返回 200，把状态放在 body 里。
     """
-    ok, reason = engine.availability()
+    tts_ok, tts_reason = engine.availability()
+    vad_ok, vad_reason = _vad_probe.availability()
+    asr_ok, asr_reason = (False, "未启用") if _asr is None else _asr.availability()
+
     return {
         "ok": True,
         "engine": engine.name,
-        "engine_ready": ok,
-        "engine_detail": reason,
+        "engine_ready": tts_ok,
+        "engine_detail": tts_reason,
         "available_engines": list(AVAILABLE_ENGINES),
         "sample_rate": engine.sample_rate,
+        "vad": {"name": _vad_probe.name, "ready": vad_ok, "detail": vad_reason},
+        "asr": {
+            "name": _asr.name if _asr else None,
+            "ready": asr_ok,
+            "detail": asr_reason,
+        },
     }
+
+
+@app.websocket("/stream")
+async def stream(ws: WebSocket) -> None:
+    """实时输入通道：麦克风音频 → VAD → ASR。协议见 stream.py 顶部注释。"""
+    # VAD 逐连接独立实例（噪声底需要自适应各自的麦克风环境）
+    session = StreamSession(ws, vad=create_vad(), asr=_asr)
+    await session.run()
 
 
 @app.get("/voices")
@@ -117,12 +141,19 @@ async def tts(req: TTSRequest) -> Response:
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    ok, reason = engine.availability()
-    log.info("引擎：%s（%s）", engine.name, "可用" if ok else "不可用")
-    if not ok:
-        log.warning("引擎不可用：%s", reason)
+    tts_ok, tts_reason = engine.availability()
+    log.info("TTS  %-10s %s", engine.name, "可用" if tts_ok else f"不可用 —— {tts_reason}")
 
-    if settings.cosyvoice_load_on_start and ok:
+    vad_ok, vad_reason = _vad_probe.availability()
+    log.info("VAD  %-10s %s", _vad_probe.name, "可用" if vad_ok else f"不可用 —— {vad_reason}")
+
+    if _asr is None:
+        log.info("ASR  未启用（VAD 与打断不受影响，只是语音进不了 LLM）")
+    else:
+        asr_ok, asr_reason = _asr.availability()
+        log.info("ASR  %-10s %s", _asr.name, "可用" if asr_ok else f"不可用 —— {asr_reason}")
+
+    if settings.cosyvoice_load_on_start and tts_ok:
         log.info("预热中…")
         try:
             engine.warmup()

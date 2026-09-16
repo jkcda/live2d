@@ -58,20 +58,72 @@ GPT-SoVITS 音色相似度更高、中文生态最完善（45k star），但**�
 
 错误码：`400` 空文本 / `422` 参数越界 / `503` 引擎未就绪 / `500` 合成失败。
 
-### `WS /stream` —— 实时对话主通道（待实现）
+### `WS /stream` —— 实时输入通道
 
-双向流。上行是麦克风音频块，下行是 TTS 音频块 + 事件。
+**为什么 TTS 不在这条通道上**：TTS 是「一句一个离散请求」，HTTP POST 更简单，
+而且前端已经接好了。这条通道只承载**必须流式**的东西 —— 麦克风音频。
+
+上行：
 
 ```
-上行  { type: 'audio', pcm: <binary> }
-      { type: 'interrupt' }              # 用户插话，立刻掐断当前 TTS
-
-下行  { type: 'vad', state: 'speech' | 'silence' }
-      { type: 'asr', text: '...', final: boolean }
-      { type: 'tts_start', id: '...' }
-      { type: 'audio', pcm: <binary> }   # 边合成边推
-      { type: 'tts_end', id: '...' }
+<binary>                      原始 PCM，int16 小端，16kHz 单声道，每块 512 采样
+{"type":"interrupt"}          用户插话：重置 VAD、丢弃正在累积的语音
 ```
+
+下行：
+
+```json
+{"type":"ready", "sample_rate":16000, "frame_samples":512,
+ "vad":"energy", "vad_ready":true, "vad_detail":"...",
+ "asr":null, "asr_ready":false, "asr_detail":"未启用"}
+
+{"type":"vad", "state":"speech"|"silence", "probability":0.83}
+{"type":"asr_start"}                              // 语音结束，开始识别
+{"type":"asr", "text":"你好呀", "final":true}
+{"type":"error", "message":"..."}
+```
+
+**帧格式必须严格对齐**：512 采样 / 16kHz / 32ms。
+前端 `src/core/audio/mic.ts` 的 `FRAME_SAMPLES` 和服务端 `vad/base.py` 里写的是同一个数，
+改动必须两边同步 —— 不一致的话 VAD 会持续读到错位的帧，表现为「怎么都不触发」。
+
+**并发模型**（见 `stream.py` 顶部注释）：
+- 收包循环只做「拆帧 + 喂 VAD」，**不做 ASR**。ASR 要几百毫秒，
+  放在收包循环里的话，用户在这期间开口会被丢掉。
+- ASR 丢到独立 task，结果走 outbox 队列。
+- 发送统一走单独的 sender task —— Starlette 的 `WebSocket.send` 不是并发安全的，
+  多个 task 直接 send 会串帧。
+
+---
+
+## VAD
+
+| 引擎 | 依赖 | 说明 |
+|---|---|---|
+| **`energy`**（默认） | 无 | 能量法。自适应噪声底 + 迟滞判定，开箱即用 |
+| **`silero`** | onnxruntime + 2MB 模型 | 有背景噪音时明显更准 |
+
+**参数偏向敏感一侧**。误触发（把噪音当人声）的代价是 TTS 被掐断一次，可以接受；
+漏触发（没听到用户开口）的代价是用户要等 TTS 说完才能插话，体验很差。
+
+实测打断延迟：**约 96ms**（3 帧确认 × 32ms），远低于 200ms 的预算。
+
+配了 `NEXUS_VAD_ENGINE=silero` 但依赖不全时**自动退回 energy**，不让服务起不来。
+
+---
+
+## ASR
+
+| 引擎 | 依赖 | 说明 |
+|---|---|---|
+| `none`（默认） | 无 | 不启用 |
+| `sensevoice` | `pip install -e ".[asr]"` | FunASR SenseVoice-Small，约 250MB，**CPU 可实时** |
+
+**ASR 不可用是合法状态，不是错误。** 没有它，VAD 和打断依然工作，
+只是用户说的话进不了 LLM。所以 `/health` 会如实报告 `asr_ready: false`，
+`WS /stream` 的 `ready` 事件里也会带上 `asr_detail`。
+
+GPU 要留给 TTS，所以 ASR 默认跑 CPU（`NEXUS_ASR_DEVICE` 可改）。
 
 ---
 
@@ -149,9 +201,13 @@ NEXUS_TTS_ENGINE=cosyvoice python -m service.main
 | `NEXUS_PORT` | `8765` | 监听端口（改了要同步改前端的「服务地址」） |
 | `NEXUS_TTS_ENGINE` | `tone` | `tone` / `cosyvoice` |
 | `NEXUS_TTS_VOICE` | `default` | 默认音色 |
-| `NEXUS_SAMPLE_RATE` | `24000` | 输出采样率 |
+| `NEXUS_SAMPLE_RATE` | `24000` | TTS 输出采样率 |
+| `NEXUS_VAD_ENGINE` | `energy` | `energy` / `silero` |
+| `NEXUS_ASR_ENGINE` | `none` | `none` / `sensevoice` |
+| `NEXUS_ASR_DEVICE` | `cpu` | `cpu` / `cuda:0` |
 | `NEXUS_COSYVOICE_DIR` | 空 | 模型目录，留空则找 `pretrained_models/CosyVoice2-0.5B` |
 | `NEXUS_COSYVOICE_WARMUP` | `0` | 设 `1` 则启动时预加载模型（慢启动，但首次请求快） |
+| `NEXUS_SILERO_MODEL` | 空 | silero_vad.onnx 路径，留空则找 `python/models/` |
 | `NEXUS_CORS_ORIGINS` | `*` | 允许的跨域来源，逗号分隔 |
 
 ---

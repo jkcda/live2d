@@ -86,7 +86,9 @@ live2d/
 │   │   ├── settings.ts          # 配置读写（localStorage）
 │   │   ├── audio/
 │   │   │   ├── player.ts        # 音频播放 + 振幅提取 + 可等待播放
-│   │   │   └── tts.ts           # 语音输出队列（合成并行 / 播放串行）
+│   │   │   ├── tts.ts           # 语音输出队列（合成并行 / 播放串行）
+│   │   │   ├── mic.ts           # 麦克风采集 → 16kHz int16 / 512 采样帧
+│   │   │   └── stream.ts        # WS 客户端（VAD/ASR 事件，barge-in 触发源）
 │   │   ├── live2d/
 │   │   │   ├── engine.ts        # 渲染引擎适配层（隔离第三方 API）
 │   │   │   ├── cubism.ts        # Cubism Core 运行时加载
@@ -102,14 +104,22 @@ live2d/
 ├── public/
 │   ├── lib/                     # Cubism Core 运行时（不入库）
 │   └── models/                  # Live2D 模型（不入库，见下）
-├── python/                      # 推理服务（TTS 已实现，ASR/VAD 待建）
+├── python/                      # 推理服务（TTS / VAD / ASR）
 │   ├── service/
-│   │   ├── main.py              # FastAPI 路由
+│   │   ├── main.py              # FastAPI 路由（HTTP + WS）
+│   │   ├── stream.py            # WS /stream 会话：音频 → VAD → ASR
 │   │   ├── audio.py             # WAV 编解码
-│   │   └── tts/
-│   │       ├── base.py          # 引擎接口
-│   │       ├── tone.py          # 内置合成音（零依赖，开发用）
-│   │       └── cosyvoice.py     # CosyVoice 2（懒加载 + 音色克隆）
+│   │   ├── tts/
+│   │   │   ├── base.py          # 引擎接口
+│   │   │   ├── tone.py          # 内置合成音（零依赖，开发用）
+│   │   │   └── cosyvoice.py     # CosyVoice 2（懒加载 + 音色克隆）
+│   │   ├── vad/
+│   │   │   ├── base.py          # 帧格式约定（512 采样 / 16kHz）
+│   │   │   ├── energy.py        # 能量法（零依赖，默认）
+│   │   │   └── silero.py        # Silero（可选，噪音环境更准）
+│   │   └── asr/
+│   │       ├── base.py
+│   │       └── sensevoice.py    # FunASR SenseVoice-Small（可选）
 │   └── voices/                  # 克隆音色的参考音频（不入库）
 └── docs/
 ```
@@ -207,12 +217,15 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 - [x] 文字对话界面（对话面板 + 设置面板 + 连接测试）
 - [x] 语音输出队列（合成并行、播放串行）
 - [x] Python 推理服务（`/health` `/voices` `/tts`，含零依赖的 tone 引擎）
+- [x] VAD（`WS /stream` 通道 + 零依赖能量法，实测打断延迟 ~96ms）
+- [x] 语音输入闭环（麦克风采集 → VAD → 打断 → ASR → 送 LLM）
 - [ ] 切到 CosyVoice 2 真实 TTS
-- [ ] VAD 触发 ASR（`WS /stream` 通道）
-- [ ] 打断闭环验证（需要真实音频流）
+- [ ] 启用 SenseVoice ASR（`NEXUS_ASR_ENGINE=sensevoice`）
 
-> 想先验证链路：`cd python && python -m service.main`，引擎用默认的 `tone`，
-> 不需要 GPU 也不需要下载模型，口型就会跟着说话节奏动起来。
+> **现在就能验证的完整链路**：起 `python -m service.main`（默认 tone 引擎，不需要 GPU 和模型），
+> 再起 `pnpm dev:web`，填个 API key，打开麦克风 —— 说话时她会立刻闭嘴（barge-in），
+> 出文字后她会回答并且口型跟着动。
+> 只差 ASR 那一步需要装 SenseVoice 才能真正听懂你说了什么。
 
 ## 后续阶段
 

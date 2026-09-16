@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
-import { chatSession, voiceOutput } from '@/core/runtime'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import {
+  bargeIn,
+  chatSession,
+  subscribeVoiceEvents,
+  subscribeVoiceStatus,
+  voiceInput,
+} from '@/core/runtime'
+import type { VoiceInputStatus } from '@/core/audio/stream'
 import { isLLMReady, loadLLMConfig } from '@/core/settings'
 import { DEFAULT_PERSONA } from '@/core/agent/persona'
 
@@ -19,9 +26,54 @@ const error = ref('')
 const listEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 
+const micOn = ref(false)
+const voiceStatus = ref<VoiceInputStatus>('idle')
+const hearing = ref(false)
+const recognizing = ref(false)
+
 const name = DEFAULT_PERSONA.name
 
-onMounted(() => inputEl.value?.focus())
+let unsubscribeEvents: (() => void) | null = null
+let unsubscribeStatus: (() => void) | null = null
+
+onMounted(() => {
+  inputEl.value?.focus()
+
+  unsubscribeStatus = subscribeVoiceStatus((status, detail) => {
+    voiceStatus.value = status
+    if (status === 'error') error.value = detail ?? '语音输入出错'
+    if (status !== 'listening') {
+      micOn.value = false
+      hearing.value = false
+    }
+  })
+
+  unsubscribeEvents = subscribeVoiceEvents((event) => {
+    if (event.type === 'vad') {
+      // 只在「正在听」时才显示，否则回放 TTS 时会被自己的声音点亮
+      hearing.value = micOn.value && event.state === 'speech'
+    } else if (event.type === 'asr_start') {
+      recognizing.value = true
+    } else if (event.type === 'asr') {
+      recognizing.value = false
+      const text = event.text.trim()
+      if (text) {
+        void sendText(text)
+      } else if (micOn.value) {
+        error.value = '没听清，再说一次？'
+      }
+    } else if (event.type === 'error') {
+      recognizing.value = false
+      error.value = event.message
+    }
+  })
+})
+
+onUnmounted(() => {
+  unsubscribeEvents?.()
+  unsubscribeStatus?.()
+  voiceInput.stop()
+})
 
 function scrollToBottom() {
   void nextTick(() => {
@@ -30,9 +82,9 @@ function scrollToBottom() {
   })
 }
 
-async function send() {
-  const text = input.value.trim()
-  if (!text || busy.value) return
+async function sendText(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed || busy.value) return
 
   const cfg = loadLLMConfig()
   if (!isLLMReady(cfg)) {
@@ -40,17 +92,16 @@ async function send() {
     return
   }
 
-  input.value = ''
   error.value = ''
   busy.value = true
 
-  bubbles.value.push({ role: 'user', text })
+  bubbles.value.push({ role: 'user', text: trimmed })
   bubbles.value.push({ role: 'assistant', text: '' })
   const replyIndex = bubbles.value.length - 1
   scrollToBottom()
 
   try {
-    for await (const ev of chatSession.send(text)) {
+    for await (const ev of chatSession.send(trimmed)) {
       if (ev.type === 'delta') {
         // 必须经由数组下标写入才能触发响应式 —— 直接改局部变量对象不会更新视图
         bubbles.value[replyIndex].text += ev.content
@@ -68,18 +119,42 @@ async function send() {
   }
 }
 
-/** 打断：掐断生成 + 掐断语音，这是陪伴感的硬需求 */
+function send() {
+  const text = input.value
+  input.value = ''
+  void sendText(text)
+}
+
+/** 打断：掐断生成 + 掐断语音 + 让服务端丢掉正在累积的语音 */
 function stop() {
-  chatSession.interrupt()
-  voiceOutput.interrupt()
+  bargeIn()
+  voiceInput.resetServer()
   busy.value = false
+}
+
+async function toggleMic() {
+  if (micOn.value) {
+    voiceInput.stop()
+    micOn.value = false
+    hearing.value = false
+    return
+  }
+
+  error.value = ''
+  try {
+    await voiceInput.start()
+    micOn.value = true
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+    micOn.value = false
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
   // Enter 发送，Shift+Enter 换行
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
-    void send()
+    send()
   }
 }
 </script>
@@ -89,6 +164,8 @@ function onKeydown(e: KeyboardEvent) {
     <header class="head">
       <span class="title">{{ name }}</span>
       <span v-if="busy" class="status">说话中…</span>
+      <span v-else-if="recognizing" class="status">识别中…</span>
+      <span v-else-if="hearing" class="status hearing">在听…</span>
       <div class="spacer" />
       <button class="icon" title="设置" @click="emit('settings')">⚙</button>
       <button class="icon" title="关闭" @click="emit('close')">✕</button>
@@ -96,7 +173,8 @@ function onKeydown(e: KeyboardEvent) {
 
     <div ref="listEl" class="list">
       <p v-if="!bubbles.length" class="empty">
-        说点什么吧。Enter 发送，Shift+Enter 换行。
+        说点什么吧。Enter 发送，Shift+Enter 换行。<br />
+        也可以点下面的麦克风直接说话。
       </p>
 
       <div v-for="(b, i) in bubbles" :key="i" class="row" :class="b.role">
@@ -110,6 +188,19 @@ function onKeydown(e: KeyboardEvent) {
     </div>
 
     <footer class="foot">
+      <button
+        class="mic"
+        :class="{ on: micOn, hearing }"
+        :title="micOn ? '关闭麦克风' : '打开麦克风'"
+        @click="toggleMic"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0" />
+          <path d="M12 18v3" />
+        </svg>
+      </button>
+
       <textarea
         ref="inputEl"
         v-model="input"
@@ -118,6 +209,7 @@ function onKeydown(e: KeyboardEvent) {
         placeholder="和她说点什么…"
         @keydown="onKeydown"
       />
+
       <button v-if="busy" class="send stop" @click="stop">打断</button>
       <button v-else class="send" :disabled="!input.trim()" @click="send">发送</button>
     </footer>
@@ -157,6 +249,10 @@ function onKeydown(e: KeyboardEvent) {
   color: #7a9ad0;
 }
 
+.status.hearing {
+  color: #7ad0a0;
+}
+
 .spacer {
   flex: 1;
 }
@@ -191,6 +287,7 @@ function onKeydown(e: KeyboardEvent) {
   margin: auto;
   color: #6a6a72;
   font-size: 12px;
+  line-height: 1.8;
   text-align: center;
 }
 
@@ -244,10 +341,43 @@ function onKeydown(e: KeyboardEvent) {
 
 .foot {
   display: flex;
+  align-items: flex-end;
   gap: 6px;
   padding: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
+}
+
+.mic {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #9a9aa2;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.mic:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #d8d8dc;
+}
+
+.mic.on {
+  background: rgba(90, 160, 200, 0.35);
+  border-color: rgba(110, 180, 220, 0.6);
+  color: #cfe8f4;
+}
+
+.mic.hearing {
+  background: rgba(90, 200, 140, 0.4);
+  border-color: rgba(110, 220, 160, 0.7);
+  color: #d4f4e2;
 }
 
 .input {
@@ -275,6 +405,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .send {
   flex-shrink: 0;
+  height: 30px;
   border: none;
   border-radius: 8px;
   padding: 0 14px;
