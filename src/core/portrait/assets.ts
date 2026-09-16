@@ -10,6 +10,8 @@
  *   mouth_2.png        嘴：大开     ┘
  *   eyes_open.png      眼：睁       ┐ 可选，有了才会眨眼
  *   eyes_closed.png    眼：闭       ┘
+ *   expr_<id>.png      表情差分     ┐ 可选，一张一个情绪（id 见 expressions.ts）
+ *                                   ┘ 整张画布的差分：脸的部分常驻，嘴在那块让位给口型
  *   hair_front.png     前发         ┐ 可选，晃动时单独动，更生动
  *   hair_back.png      后发         ┘
  *
@@ -20,6 +22,7 @@
  */
 
 import { Assets, Rectangle, Texture } from 'pixi.js'
+import { EXPRESSION_SPECS, expressionFileNames } from './expressions'
 
 export interface PortraitRegion {
   x: number
@@ -71,6 +74,20 @@ export interface PortraitManifest {
   }
 }
 
+/**
+ * 一张表情差分。
+ *
+ * 差分图是**整张画布**尺寸、只有变化的那一块有内容（和画师给的 PSD 分层一致），
+ * 所以叠上去不用对位。
+ */
+export interface PortraitExpression {
+  /** 规范 id（`expr_<id>.png`），也是界面与反应编排里用的名字 */
+  id: string
+  /** 界面显示名 */
+  label: string
+  texture: Texture
+}
+
 export interface PortraitAssets {
   manifest: PortraitManifest
   baseUrl: string
@@ -104,6 +121,8 @@ export interface PortraitAssets {
    * 支点取错更不行（会露出底图的闭嘴线），所以就地问 alpha 质心。
    */
   mouthPatches: (PortraitPatch | undefined)[]
+  /** 表情差分（按 `expressions.ts` 的候选顺序）。长度可能是 0 */
+  expressions: PortraitExpression[]
 }
 
 async function loadOptionalTexture(url: string): Promise<Texture | undefined> {
@@ -454,6 +473,31 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
     )
   }
 
+  /*
+   * 表情差分：一张一个情绪，缺哪张就是"这个角色做不出这个表情"（静默跳过）。
+   *
+   * ★ 名字不写死在这一处：候选名（含中文别名）来自 `expressions.ts`，
+   *   和设置面板里做**素材探测**的那份是同一份 —— 那边说有、这边就一定要能加载到，
+   *   否则会出现"能力显示有表情，点了却没反应"。
+   */
+  const expressions: PortraitExpression[] = []
+  for (const spec of EXPRESSION_SPECS) {
+    for (const name of expressionFileNames(spec)) {
+      const texture = await loadOptionalTexture(`${base}/expr_${name}.png`)
+      if (texture) {
+        expressions.push({ id: spec.id, label: spec.label, texture })
+        break
+      }
+    }
+  }
+
+  if (import.meta.env.DEV && expressions.length) {
+    console.info(
+      `[portrait] 表情差分 ${expressions.length} 张：` +
+        expressions.map((e) => `${e.id}(${e.label})`).join('、'),
+    )
+  }
+
   return {
     manifest,
     baseUrl: base,
@@ -468,6 +512,7 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
     pupil,
     mouths,
     mouthPatches,
+    expressions,
   }
 }
 

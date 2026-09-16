@@ -27,6 +27,7 @@
  */
 
 import { loadCharacterKind, saveCharacterKind, type CharacterKind } from './mode'
+import { EXPRESSION_SPECS, expressionFileNames } from '../portrait/expressions'
 
 /** 立绘素材目录里各文件的存在性（探测出来的，不是配置里写的） */
 export interface PortraitProbe {
@@ -39,6 +40,8 @@ export interface PortraitProbe {
   pupil: boolean
   hairFront: boolean
   hairBack: boolean
+  /** 探测到的表情差分 id（`expr_<id>.png`，中文别名也算）；空数组 = 一张都没有 */
+  expressions: string[]
 }
 
 /**
@@ -151,7 +154,23 @@ export async function probePortrait(dir: string): Promise<PortraitProbe> {
   if (m0) mouths = m1 ? (m2 ? 3 : 2) : 1
   else if (m1) mouths = m2 ? 2 : 1
 
-  return { body, mouths, eyesClosed, eyesOpen, pupil, hairFront, hairBack }
+  /*
+   * 表情：候选文件名（含中文别名）来自 expressions.ts —— 和渲染层加载用的是同一份，
+   * 所以「探测说有」就一定能加载到，不会出现「能力里有表情、点了却没反应」。
+   * 一个 id 探到第一个存在的文件就够了（id 优先，别名兜底）。
+   */
+  const expressions = (
+    await Promise.all(
+      EXPRESSION_SPECS.map(async (spec) => {
+        for (const name of expressionFileNames(spec)) {
+          if (await probeAsset(`${base}expr_${name}.png`)) return spec.id
+        }
+        return null
+      }),
+    )
+  ).filter((id): id is string => id !== null)
+
+  return { body, mouths, eyesClosed, eyesOpen, pupil, hairFront, hairBack, expressions }
 }
 
 /** 由探测结果推出能力表（配置里写的声明不作数，实测才算） */
@@ -173,7 +192,8 @@ export function featuresOf(pack: CharacterPack, probe?: PortraitProbe): Characte
     mouthArt: probe?.mouths ?? 0,
     hairSway: Boolean(probe?.hairFront || probe?.hairBack),
     motions: false,
-    expressions: false,
+    // 立绘的表情 = 画好的差分图（expr_<id>.png），探测到几张就有几个情绪
+    expressions: (probe?.expressions.length ?? 0) > 0,
   }
 }
 

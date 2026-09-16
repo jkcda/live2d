@@ -49,6 +49,17 @@ export function classify(expressions: ExpressionDrive[]): Array<{ name: string; 
   return expressions.map((e) => ({ name: e.name, mood: moodOf(e) }))
 }
 
+export interface PickExpressionOptions {
+  /**
+   * 没有对得上情绪的表情时，返回 `undefined` 而不是随机挑一张。
+   *
+   * 立绘走 strict：那边的表情是画师一张张画的，素材往往只有两三张，
+   * 随机挑非常容易「摸头却甩她一张生气的脸」—— 那比没有反应更糟。
+   * Live2D 不 strict：模型的表情是一整套，随便挑一张也比毫无反应强。
+   */
+  strict?: boolean
+}
+
 /**
  * 按命中区挑一个表情。
  *
@@ -59,6 +70,7 @@ export function pickExpression(
   expressions: Array<{ name: string; mood: Mood }>,
   areas: string[],
   recent: string[] = [],
+  opts: PickExpressionOptions = {},
 ): string | undefined {
   if (!expressions.length) return undefined
 
@@ -78,6 +90,9 @@ export function pickExpression(
       return candidates[Math.floor(Math.random() * candidates.length)].name
     }
   }
+
+  // 一张对得上情绪的都没有 —— strict 时到此为止（不变脸）
+  if (opts.strict) return undefined
 
   const pool = expressions.filter((e) => !avoid.has(e.name))
   const list = pool.length ? pool : expressions

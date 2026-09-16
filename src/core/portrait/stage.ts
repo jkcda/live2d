@@ -14,15 +14,18 @@
  * 这是 PNGTuber 的通行做法：离散换图，不做形变。看起来「够活」，成本几乎为零。
  */
 
-import { Application, Container, Sprite } from 'pixi.js'
+import { Application, Container, Rectangle, Sprite, Texture } from 'pixi.js'
 import type { CharacterAbilities, CharacterFrame, CharacterStage } from '../character/types'
 import type { CharacterTuning } from '../character/packs'
+import { pickExpression } from '../live2d/reactions'
 import {
   buildAlphaMask,
   loadPortrait,
   splitAtJaw,
+  type PortraitExpression,
   type PortraitManifest,
 } from './assets'
+import { expressionSpec } from './expressions'
 
 /** idle.ts 里各参数的标称幅度，用来把参数归一化成 0~1 再映射到位移/旋转 */
 const ANGLE_X_RANGE = 4
@@ -76,6 +79,26 @@ const PUPIL_LIFT_RATIO = 1.35
 const DEFAULT_CLOSED_LEVEL = 0.1
 /** 刚开口时的最小缩放：再小就看不出张开了，只剩一条缝 */
 const DEFAULT_MIN_OPEN_SCALE = 0.35
+
+/**
+ * 被点之后表情挂多久（毫秒），和 Live2D 那边的兜底时长保持一致。
+ * 到了就自动回到素颜 —— 表情是「反应」，不该永久挂在脸上。
+ */
+const EXPRESSION_HOLD_MS = 4000
+
+/**
+ * 表情的嘴那一块往外扩多少像素（再遮住）。
+ *
+ * 为什么要一个数、为什么是 6：表情差分的**嘴是单独一坨**（和眉毛/脸颊不相连），
+ * 说话时这块必须让位给口型，否则底图那张嘴和表情那张嘴会同时出现在脸上。
+ * 遮挡靠一张「底图同一位置的切片」—— 于是一个矩形要既完整盖住表情的嘴、
+ * 又不碰旁边的脸颊。实测（`expr_angry` / `expr_sad` 两张差分）：
+ *   嘴差分的包围盒 = 785,410 ~ 846,444；表情的嘴 = 784,419 ~ 849,438（孤立一团）
+ *   margin 6 → 779,404 ~ 852,450：正好只包住嘴，碰到 0 个别的色块
+ *   margin 8 → 777,402 ~ 854,452：开始切到脸颊的 7 个像素（说话时会闪一下）
+ * 所以取 6。换素材后如果表情的嘴比嘴差分大得多，这个值要重调。
+ */
+const MOUTH_COVER_MARGIN = 6
 
 /** 口型的开合映射参数（可被角色包覆盖） */
 export interface MouthMapping {
@@ -139,10 +162,28 @@ export interface PortraitStageOptions {
   tuning?: CharacterTuning
 }
 
+/**
+ * 立绘舞台。比 `CharacterStage` 多一条：**能手动切表情**。
+ *
+ * 为什么这条不进 `CharacterStage`：Live2D 那边表情是模型的资源（`model.setExpression`），
+ * 语义和「立绘换一张差分」并不一样，硬塞进公共接口只会让两边互相将就。
+ * 上层需要时用 `kind === 'portrait'` 收窄即可（设置面板/悬浮条就是这么用的）。
+ */
+export interface PortraitCharacter extends CharacterStage {
+  kind: 'portrait'
+  /**
+   * 切表情。`null` = 素颜。
+   * 手动切的表情**不会自动复原**（用户是特意选的）；点击反应走的是限时那条路。
+   */
+  setExpression(id: string | null): void
+  /** 素材里实际存在的表情 id（= `abilities.expressionNames`） */
+  readonly expressionNames: string[]
+}
+
 export async function createPortraitStage(
   host: HTMLElement,
   opts: PortraitStageOptions = {},
-): Promise<CharacterStage> {
+): Promise<PortraitCharacter> {
   const assets = await loadPortrait(opts.baseUrl ?? 'portrait')
   const manifest = assets.manifest
   const canvasW = manifest.canvas.width
@@ -188,6 +229,28 @@ export async function createPortraitStage(
   }
 
   /*
+   * 表情图层：整张差分盖在脸上（眉毛/眼睛/脸颊都归它），**在瞳孔和眼差分之下**。
+   *
+   * z 顺序是权衡出来的，往上一格就丢东西：
+   *   在底图之上 → 表情能盖住底图的眉毛（必须的，不然皱眉只皱一半）；
+   *   在瞳孔之下 → 瞳仁还看得见，「眼睛跟着鼠标动」不会被表情吃掉；
+   *   在眼差分之下 → 眨眼还能盖住它（表情画的是睁着的眼睛）。
+   * 唯独它自带的那张嘴得单独处理 —— 见 mouthCover。
+   */
+  const exprLayer = assets.expressions.length ? new Sprite(assets.expressions[0].texture) : null
+  if (exprLayer) {
+    exprLayer.visible = false
+    root.addChild(exprLayer)
+  }
+
+  /*
+   * 当前挂着的表情 / 到期时间（0 = 手动选的，不过期）。
+   * 状态放在闭包里而不是挂在 sprite 上：验证脚本要能读到"现在到底是谁的脸"。
+   */
+  let expr: PortraitExpression | null = null
+  let exprUntil = 0
+
+  /*
    * 瞳孔图层：画在底图之上、眼差分之下 ——
    * 这样眨眼时闭眼图会盖住它（顺序反了就会"闭着眼还能看到眼珠"）。
    */
@@ -214,6 +277,42 @@ export async function createPortraitStage(
       mouth.position.set(patch.anchorX, patch.anchorY)
     }
     root.addChild(mouth)
+  }
+
+  /*
+   * ── 说话时盖住「表情自带的嘴」的那一小块 ──
+   *
+   * 为什么要它：表情差分里也画了一张嘴，而口型是**另一条图层**（mouth_1.png 缩放叠加）。
+   * 两张嘴同时出现在脸上就露馅了。但只在**真的在叠口型差分**时才需要遮 ——
+   * 闭嘴那一档是空纹理，这时候恰恰要露出表情的嘴，否则「生气」的脸配一张素颜嘴。
+   *
+   * 做法：直接从**底图**同一位置切一个矩形盖上，而不是"把表情图挖个洞"。
+   * 挖洞要给每张表情多存一张整画布纹理（1600×2848×4 ≈ 18MB），
+   * 而这里借的是底图**同一份 GPU 纹理**，切子矩形不额外占显存。
+   * 代价是这个矩形里凡是表情画的东西都会被底图盖掉 ——
+   * 所以它必须只框住嘴，靠 MOUTH_COVER_MARGIN 保证（那个常量有实测数据）。
+   *
+   * 盖的是底图那张**闭嘴**的脸：口型差分本来就是在它上面缩放叠加的（做表情之前一直如此），
+   * 所以说话时看到的东西和"没有表情功能"时完全一样。
+   *
+   * 没有嘴差分的角色（靠拉下巴张嘴）没有这一层：那种情况下表情的嘴会挡住下巴拉伸。
+   */
+  const mouthPatch = assets.mouthPatches.find((p) => p)
+  let mouthCover: Sprite | null = null
+  let mouthCoverBox: { x: number; y: number; width: number; height: number } | null = null
+  if (exprLayer && mouth && mouthPatch) {
+    const x = Math.max(0, Math.round(mouthPatch.x - MOUTH_COVER_MARGIN))
+    const y = Math.max(0, Math.round(mouthPatch.y - MOUTH_COVER_MARGIN))
+    const width = Math.min(canvasW - x, Math.round(mouthPatch.width + MOUTH_COVER_MARGIN * 2))
+    const height = Math.min(canvasH - y, Math.round(mouthPatch.height + MOUTH_COVER_MARGIN * 2))
+    mouthCoverBox = { x, y, width, height }
+    mouthCover = new Sprite(
+      new Texture({ source: assets.body.source, frame: new Rectangle(x, y, width, height) }),
+    )
+    mouthCover.position.set(x, y)
+    mouthCover.visible = false
+    // ★ 必须插在口型图层**下面**：放上面就把口型自己遮掉了
+    root.addChildAt(mouthCover, root.getChildIndex(mouth))
   }
 
   const hairFront = assets.hairFront ? new Sprite(assets.hairFront) : null
@@ -310,6 +409,10 @@ export async function createPortraitStage(
     /** 瞳孔相对底图的偏移（画布像素），排查"眼睛没动"时看它 */
     pupilX: 0,
     pupilY: 0,
+    /** 当前挂在脸上的表情 id（null = 素颜） */
+    expression: null as string | null,
+    /** 表情自带的嘴这一帧是否让给了口型 */
+    expressionMouthYielded: false,
   }
 
   const applyFrame = (frame: CharacterFrame) => {
@@ -396,11 +499,18 @@ export async function createPortraitStage(
 
     // 口型
     const m = clamp01(frame.mouth)
+    /**
+     * 这一帧口型是不是**真的叠了差分**（不是"闭嘴"那一档）。
+     * 表情的嘴要不要让位就看它 —— 用开口度阈值判断是错的：
+     * 阈值和 mouthMap.closedLevel 是两套数，改一个忘另一个就会"嘴闭着却盖着表情的嘴"。
+     */
+    let mouthArtDrawn = false
     if (mouth && mouthStates.length) {
       const pick = mouthLevel(m, mouthStates.length, mouthMap)
       shown.mouthIndex = pick.index
       shown.mouthScale = pick.scale
       mouth.texture = mouthStates[pick.index]
+      mouthArtDrawn = pick.index > 0
       /*
        * 纵向缩放做出中间档。
        * 只有一张嘴差分时（最常见的情况），要是不缩放，口型就只剩「闭 / 全开」两态，
@@ -413,6 +523,26 @@ export async function createPortraitStage(
       shown.jawStretch = 1 + m * 0.05
       jaw.scale.set(1, shown.jawStretch)
     }
+
+    /*
+     * 表情。
+     *
+     * 到期就回到素颜（点击反应挂的是限时表情）；手动选的（exprUntil = 0）一直挂着。
+     * 判断放在这里而不是用 setTimeout：每帧本来就要读 now，
+     * 而且待机停下时（比如窗口隐藏）不该继续"计时"。
+     */
+    if (expr && exprUntil !== 0 && now >= exprUntil) {
+      expr = null
+      exprUntil = 0
+    }
+    if (exprLayer) {
+      if (expr && exprLayer.texture !== expr.texture) exprLayer.texture = expr.texture
+      exprLayer.visible = expr !== null
+    }
+    if (mouthCover) mouthCover.visible = expr !== null && mouthArtDrawn
+    shown.expression = expr?.id ?? null
+    /** 表情的嘴这一帧让给口型了吗（排查"两张嘴"时先看它） */
+    shown.expressionMouthYielded = mouthCover ? mouthCover.visible : false
   }
 
   /**
@@ -464,7 +594,8 @@ export async function createPortraitStage(
     return mask.alpha[my * mask.width + mx] > 40
   }
 
-  const hitAreaAt = (clientX: number, clientY: number): string[] => {    const rect = app.canvas.getBoundingClientRect()
+  const hitAreaAt = (clientX: number, clientY: number): string[] => {
+    const rect = app.canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return []
     const nx = (clientX - rect.left) / rect.width
     const ny = (clientY - rect.top) / rect.height
@@ -479,15 +610,57 @@ export async function createPortraitStage(
     return hits
   }
 
+  const expressionNames = assets.expressions.map((e) => e.id)
+  /** 纹理 → id：验证脚本要能说出"现在画的是哪一张脸" */
+  const textureIds = new Map(assets.expressions.map((e) => [e.texture, e.id]))
+
+  /**
+   * 切表情（`null` = 素颜）。
+   *
+   * @param holdMs > 0 时限时挂一会儿后自动复原（点击反应走这条），0 = 一直挂着（手选）
+   */
+  const setExpression = (id: string | null, holdMs = 0): void => {
+    if (id === null) {
+      expr = null
+      exprUntil = 0
+      return
+    }
+    const found = assets.expressions.find((e) => e.id === id)
+    if (!found) {
+      // 认不出来就只警告、不动画面 —— 静默失败是这类功能最难查的故障
+      if (import.meta.env.DEV) {
+        console.warn(
+          `[portrait] 没有这张表情：${id}｜可用：${expressionNames.join('、') || '（一张都没有）'}`,
+        )
+      }
+      return
+    }
+    expr = found
+    exprUntil = holdMs > 0 ? performance.now() + holdMs : 0
+  }
+
+  /*
+   * 表情的「名字 → 情绪」表：立绘的表情情绪推不出来（Live2D 是从 exp3 驱动的参数推的），
+   * 只能由文件名声明，声明表在 expressions.ts。
+   */
+  const expressionCatalog = assets.expressions.map((e) => ({
+    name: e.id,
+    mood: expressionSpec(e.id)?.mood ?? 'neutral',
+  }))
+  /** 最近给过的表情：连着戳同一个地方时换一张，别一直同一张脸 */
+  const recentExpressions: string[] = []
+
   const abilities: CharacterAbilities = {
     lipSyncParams: [],
-    expressionNames: [],
+    expressionNames,
     motionGroups: {},
   }
 
-  const stage: CharacterStage = {
+  const stage: PortraitCharacter = {
     kind: 'portrait',
     abilities,
+    expressionNames,
+    setExpression,
     layout,
     applyFrame,
     hitTest,
@@ -496,11 +669,27 @@ export async function createPortraitStage(
     react(areas: string[]) {
       reactionKind = areas[0] === 'Head' ? 'head' : 'body'
       reactionUntil = performance.now() + 420
+
+      /*
+       * 表情：复用 Live2D 那套情绪编排（摸头想要开心/害羞，戳身体想要惊讶/不满），
+       * 只是情绪从文件名来而不是从参数推。
+       *
+       * ★ strict：没有对得上情绪的表情时**宁可不变脸**。
+       *   Live2D 那边是「宁可重复也别没反应」—— 模型的表情是一整套，总能挑到一个；
+       *   而立绘的表情是画师一张张画的：只有「生气」「伤心」两张素材时，
+       *   摸头随机甩一张生气的脸，比没有反应更糟。
+       */
+      const picked = pickExpression(expressionCatalog, areas, recentExpressions, { strict: true })
+      if (picked) {
+        recentExpressions.unshift(picked)
+        if (recentExpressions.length > 2) recentExpressions.pop()
+        setExpression(picked, EXPRESSION_HOLD_MS)
+      }
+
       if (import.meta.env.DEV) {
-        console.debug(`[stage] 被点了 ${JSON.stringify({ areas, reaction: reactionKind })}`)
-        Object.assign(window as unknown as Record<string, unknown>, {
-          __nexusLastPoke: { areas, reaction: reactionKind },
-        })
+        const reaction = { areas, reaction: reactionKind, expression: picked ?? null }
+        console.debug(`[stage] 被点了 ${JSON.stringify(reaction)}`)
+        Object.assign(window as unknown as Record<string, unknown>, { __nexusLastPoke: reaction })
       }
     },
     destroy() {
@@ -526,7 +715,28 @@ export async function createPortraitStage(
           /** 闭嘴/睁眼是用「不叠加」补的（底图本身就是那个状态） */
           derivedClosedMouth: assets.derivedClosedMouth,
           derivedOpenEyes: assets.derivedOpenEyes,
+          /** 表情差分实际加载到的张数（缺哪张就是"这个角色做不出这个表情"） */
+          expressions: assets.expressions.length,
         },
+        /** 表情：可用的清单 + 手动切换入口（验证脚本靠它逐张看效果） */
+        expressions: assets.expressions.map((e) => ({ id: e.id, label: e.label })),
+        setExpression: (id: string | null, holdMs = 0) => setExpression(id, holdMs),
+        /**
+         * 图层的**真实**可见状态（从 Pixi 场景里读，不是从状态变量推）。
+         *
+         * 为什么非要读场景：`shown.expression` 只是"我打算显示哪张脸"，
+         * setExpression 一调它就变了 —— 拿它断言等于自己证明自己。
+         * 真正要验的是「那张差分确实被画上去了，而且说的时候嘴那块让开了」。
+         */
+        layers: () => ({
+          expressionVisible: exprLayer?.visible ?? false,
+          expressionId: exprLayer ? (textureIds.get(exprLayer.texture) ?? null) : null,
+          expressionCount: assets.expressions.length,
+          mouthCoverVisible: mouthCover?.visible ?? false,
+          eyesVisible: eyes?.visible ?? false,
+        }),
+        /** 说话时用来遮住「表情自带的嘴」的那个矩形（画布像素），排查"两张嘴"时看它 */
+        mouthCoverBox,
         mask,
         /**
          * 当前的根变换（renderer 坐标）。

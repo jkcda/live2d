@@ -276,6 +276,141 @@ async function main() {
   }
 
   /*
+   * 表情差分。
+   *
+   * 验的是三件**互相独立**的事，缺一件都会「看起来做了表情但不对」：
+   *   1. 切过去之后那张差分确实被画上去了（读 Pixi 场景的可见性，不是读状态变量）
+   *   2. 闭嘴时表情**自己那张嘴**露着（被遮了的话表情就白做了）
+   *   3. 说话时它让位给口型 —— 否则底图的嘴和表情的嘴会同时在脸上
+   *
+   * 判据 3 光靠数值不够硬，所以每个状态都截了图：
+   * `expr-<id>-talk` 与 `expr-neutral-talk`（同样的开口度）拿去逐像素比，
+   * **嘴那一块必须完全一样**，而眉眼那块必须不一样。
+   */
+  const exprChecks = []
+  if (portrait) {
+    const info = await evaluate(`(() => {
+      const p = window.__nexusPortrait
+      return { available: p.expressions, cover: p.mouthCoverBox }
+    })()`)
+    const layers = () =>
+      evaluate(`JSON.parse(JSON.stringify(window.__nexusPortrait.layers()))`)
+    const setExpression = async (id) => {
+      await evaluate(`window.__nexusPortrait.setExpression(${id === null ? 'null' : `'${id}'`})`)
+      await sleep(260)
+      return layers()
+    }
+
+    console.log(
+      `\n表情：素材 ${info.available.length} 张（${info.available.map((e) => `${e.id}=${e.label}`).join('、') || '无'}）` +
+        `｜遮嘴矩形 ${info.cover ? `${info.cover.x},${info.cover.y} ${info.cover.width}×${info.cover.height}` : '无'}`,
+    )
+
+    await freezeIdle(true)
+    await setMouth(0)
+    const neutralSilent = await shoot('expr-neutral')
+    await setMouth(0.5)
+    const neutralTalk = await shoot('expr-neutral-talk')
+    console.log(`素颜：闭嘴 ${JSON.stringify(await layers())}`)
+
+    const exprShots = {}
+    for (const e of info.available) {
+      await setMouth(0)
+      const silent = await setExpression(e.id)
+      const silentShot = await shoot(`expr-${e.id}`)
+
+      await setMouth(0.5)
+      const talk = await setExpression(e.id)
+      const talkShot = await shoot(`expr-${e.id}-talk`)
+      const shown = (await snapshot())?.shown ?? {}
+
+      console.log(
+        `  ${e.label}(${e.id})：闭嘴→图层 ${silent.expressionVisible ? `显示「${silent.expressionId}」` : '未显示'}` +
+          `｜说话→图层 ${talk.expressionVisible ? '显示' : '未显示'}、遮嘴 ${talk.mouthCoverVisible ? '开（口型接管）' : '关'}` +
+          `｜口型差分区 #${shown.mouthIndex}`,
+      )
+
+      exprShots[e.id] = { silent: silentShot, talk: talkShot }
+      exprChecks.push(
+        [`${e.label}：切过去后差分真的画上去了`, silent.expressionVisible && silent.expressionId === e.id],
+        [`${e.label}：闭嘴时表情自己的嘴露着`, silent.mouthCoverVisible === false],
+        [
+          `${e.label}：说话时表情的嘴让位给口型`,
+          talk.expressionVisible && talk.mouthCoverVisible === true && (shown.mouthIndex ?? 0) > 0,
+        ],
+      )
+    }
+
+    const cleared = await setExpression(null)
+    // 素颜 + 说话：这时候没有"表情的嘴"要遮，遮罩必须是关的
+    await setMouth(0.5)
+    const neutralTalking = await layers()
+    await setMouth(0)
+    exprChecks.push(['收回素颜后表情图层隐藏', cleared.expressionVisible === false])
+    exprChecks.push(
+      ['遮嘴矩形落在嘴的位置上（存在且小于整张画布）', Boolean(info.cover) && info.cover.width < 200],
+    )
+    exprChecks.push(['素颜时说话不遮嘴（没有表情的嘴要遮）', neutralTalking.mouthCoverVisible === false])
+
+    let ok = true
+    for (const [label, pass] of exprChecks) {
+      if (!pass) ok = false
+      console.log(`  ${pass ? '✅' : '❌'} ${label}`)
+    }
+
+    /*
+     * 点击 → 表情：走的是 Live2D 那套情绪编排（摸头想要开心/害羞，戳身体想要惊讶/不满），
+     * 只是立绘的情绪由文件名声明（见 portrait/expressions.ts）。
+     *
+     * ★ 两条断言缺一不可：
+     *   戳身体**必须**变脸 —— 伤心/生气都算 unhappy，正好对得上"戳一下她不满"；
+     *   摸头**必须不变脸** —— 素材里没有开心/害羞，strict 模式下宁可没反应，
+     *   也不能像 Live2D 那样随机甩一张生气的脸出来（那是这套编排最容易做错的地方）。
+     */
+    const pokes = []
+    for (const area of ['Body', 'Body', 'Head']) {
+      await setExpression(null)
+      await evaluate(`window.__nexusStage.stage.react(['${area}'])`)
+      await sleep(220)
+      const state = await layers()
+      // 反应的弹跳还在进行，这里只读图层，不看像素
+      pokes.push({ area, expression: state.expressionId, visible: state.expressionVisible })
+      console.log(`  戳${area === 'Head' ? '头' : '身体'} → ${state.expressionVisible ? `换脸「${state.expressionId}」` : '不变脸（保持素颜）'}`)
+    }
+    exprChecks.push(
+      ['戳身体 → 按情绪挑到不满系表情（生气/伤心）', pokes[0].visible && ['angry', 'sad'].includes(pokes[0].expression)],
+      ['戳身体 → 连着戳会换一张（不是永远同一张脸）', pokes[1].visible],
+      ['摸头 → 没有开心/害羞素材时不变脸（strict）', pokes[2].visible === false],
+    )
+
+    // 限时表情到点自己回到素颜（4s）—— 表情是"反应"，不该永久挂在脸上
+    await setExpression(null)
+    await evaluate(`window.__nexusStage.stage.react(['Body'])`)
+    // 图层可见性是**每帧**在 applyFrame 里刷的，react 之后要等一帧才读得到
+    await sleep(250)
+    const duringPoke = await layers()
+    await sleep(4600)
+    const afterHold = await layers()
+    exprChecks.push([
+      '点击给的表情 4 秒后自动收回',
+      duringPoke.expressionVisible === true && afterHold.expressionVisible === false,
+    ])
+    console.log(
+      `  限时表情：戳完 ${duringPoke.expressionVisible ? '显示' : '没显示'} → 4.6s 后 ${afterHold.expressionVisible ? '还挂着 ❌' : '已收回 ✅'}`,
+    )
+
+    for (const [label, pass] of exprChecks.slice(-4)) {
+      if (!pass) ok = false
+      console.log(`  ${pass ? '✅' : '❌'} ${label}`)
+    }
+    if (!ok) console.log('  ⚠ 表情用例有失败项')
+    writeFileSync(
+      join(OUT_DIR, 'expressions.json'),
+      JSON.stringify({ info, neutralSilent, neutralTalk, shots: exprShots }, null, 2),
+    )
+  }
+
+  /*
    * 待机漂移：隔一段时间连拍若干张，交给外部逐像素比。
    *
    * 为什么要测这个：待机是**永远在跑**的，一旦旋转支点/幅度不对，

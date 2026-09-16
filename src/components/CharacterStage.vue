@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { createLive2DCharacter, type Live2DCharacter } from '@/core/character/live2d'
-import { createPortraitStage } from '@/core/portrait/stage'
+import { createPortraitStage, type PortraitCharacter } from '@/core/portrait/stage'
+import { expressionLabel } from '@/core/portrait/expressions'
 import type { CharacterFrame, CharacterStage } from '@/core/character/types'
 import { resolveModelUrl } from '@/core/live2d/models'
 import { classify } from '@/core/live2d/reactions'
@@ -19,7 +20,8 @@ import { audioPlayer } from '@/core/runtime'
  * 换模型时用 handle 的能力接口先看两件事：
  *   1. 有 Groups.LipSync（否则口型无处可写，比如 Mao 是 ParamA）
  *   2. 有 Expressions / HitAreas（否则表情和点击反馈做不了，比如 miara 两样都没有）
- *
+ */
+
 /**
  * 角色舞台。
  *
@@ -64,7 +66,35 @@ const kindLabel = ref('')
 /** 当前角色名，显示在测试条上 */
 const packName = ref('')
 
+/**
+ * 表情：素材里实际存在的那几张（只有立绘才有）。
+ *
+ * 为什么做成按钮而不是"让她自己随机换"：表情是**看一眼就知道对不对**的东西，
+ * 让用户靠戳身体碰运气试出来太别扭；而且素材少了以后，
+ * 随机挑很容易出现"摸头却甩一张生气的脸"，那比没反应更糟。
+ */
+const expressionIds = ref<string[]>([])
+/** 手动选中的表情（null = 素颜）。点击反应给的是限时表情，不进这里 */
+const activeExpression = ref<string | null>(null)
+const expressionChips = computed(() =>
+  expressionIds.value.map((id) => ({ id, label: expressionLabel(id) })),
+)
+
+/** 点一下换这张脸，再点一下收回素颜 */
+function toggleExpression(id: string): void {
+  if (!portrait) return
+  const next = activeExpression.value === id ? null : id
+  activeExpression.value = next
+  portrait.setExpression(next)
+}
+
 let stage: CharacterStage | null = null
+/**
+ * 立绘舞台（有表情时要用它多出来的 `setExpression`）。
+ * 单独留一份引用而不是每次 `stage as PortraitCharacter`：
+ * 类型断言在换渲染器时不会报错，只会静默地不工作。
+ */
+let portrait: PortraitCharacter | null = null
 let idle: IdleAnimator | null = null
 let lipsync: LipSyncDriver | null = null
 /** 视线驱动：鼠标在哪她就往哪看（渲染器无关，见 core/character/gaze.ts） */
@@ -286,10 +316,13 @@ async function mount(s: PackState): Promise<void> {
 
   if (pack.kind === 'portrait') {
     status.value = `立绘加载中…（${pack.name}）`
-    stage = await createPortraitStage(el, {
+    const created = await createPortraitStage(el, {
       baseUrl: pack.dir ?? 'portrait',
       tuning: pack.tuning,
     })
+    stage = created
+    portrait = created
+    expressionIds.value = created.expressionNames
     kindLabel.value = '立绘'
   } else {
     status.value = `模型加载中…（${pack.name}）`
@@ -297,8 +330,13 @@ async function mount(s: PackState): Promise<void> {
     const live2d = await createLive2DCharacter(el, { url })
     stage = live2d
     kindLabel.value = 'Live2D'
+    // 换到 Live2D：把立绘那套表情入口收掉（它的表情走模型自己的资源）
+    portrait = null
+    expressionIds.value = []
     logAbilities(live2d)
   }
+  // 换了角色就回到素颜：上一次选的表情属于上一个角色，素材可能根本没这张
+  activeExpression.value = null
 
   // 口型手感可以按角色调（比如某个角色的立绘振幅偏小）
   lipsync = new LipSyncDriver(pack.tuning?.lipsync)
@@ -346,6 +384,7 @@ function unmount(): void {
   hovering.value = false
   stage?.destroy()
   stage = null
+  portrait = null
   // 渲染器可能留了 canvas / 调试用元素，一律清掉
   if (host.value) host.value.replaceChildren()
 }
@@ -475,11 +514,23 @@ onUnmounted(() => {
         class="test-bar no-drag"
         @pointerenter="barHovered = true"
         @pointerleave="barHovered = false"
+        @pointerdown.stop
       >
         <span class="tag">{{ kindLabel }}</span>
         <span v-if="packName" class="name">{{ packName }}</span>
         <button class="btn" @click="testLipSync">测试口型</button>
         <button class="btn" @click="testInterrupt">打断</button>
+        <!-- 表情：一个角色有哪些差分就显示哪几个（没有就整排不出现） -->
+        <button
+          v-for="chip in expressionChips"
+          :key="chip.id"
+          class="btn"
+          :class="{ on: activeExpression === chip.id }"
+          :title="`表情：${chip.label}（再点一下收回）`"
+          @click="toggleExpression(chip.id)"
+        >
+          {{ chip.label }}
+        </button>
       </div>
     </Transition>
   </div>
@@ -609,6 +660,13 @@ onUnmounted(() => {
 
 .btn:hover {
   background: rgba(255, 255, 255, 0.16);
+}
+
+/* 选中的表情：一眼看出"现在这张脸是我选的"，再点一下收回 */
+.btn.on {
+  background: rgba(90, 120, 200, 0.45);
+  border-color: rgba(140, 170, 235, 0.6);
+  color: #eaeefb;
 }
 
 .fade-enter-active,
