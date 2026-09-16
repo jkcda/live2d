@@ -138,11 +138,26 @@ async function main() {
     })()`)
 
   const assets = await snapshot()
-  if (!assets) throw new Error('没有 __nexusPortrait —— 当前不是立绘模式？')
-  console.log(`素材：${JSON.stringify(assets.counts)}`)
-  console.log(`取景：${JSON.stringify(assets.content)}  命中区：${assets.regions.join('/')}`)
-  console.log(`命中率：${(assets.opaqueRatio * 100).toFixed(1)}%`)
-  console.log(`初始状态：${JSON.stringify(assets.shown)}`)
+  /*
+   * 不是立绘模式（比如 ?live2d=1）时，立绘专属的断言跳过 ——
+   * 但**待机漂移**这条对两个渲染器都成立，所以照样测（见文件末尾）。
+   */
+  const portrait = Boolean(assets)
+  if (portrait) {
+    console.log(`素材：${JSON.stringify(assets.counts)}`)
+    console.log(`取景：${JSON.stringify(assets.content)}  命中区：${assets.regions.join('/')}`)
+    console.log(`命中率：${(assets.opaqueRatio * 100).toFixed(1)}%`)
+    console.log(`初始状态：${JSON.stringify(assets.shown)}`)
+  } else {
+    const info = await evaluate(`(() => {
+      const s = window.__nexusStage.stage
+      return { kind: s.kind, lipSync: s.abilities.lipSyncParams, motions: s.abilities.motionGroups }
+    })()`)
+    console.log(
+      `渲染器：${info.kind}｜口型参数 ${JSON.stringify(info.lipSync)}｜动作组 ${JSON.stringify(info.motions)}`,
+    )
+    console.log('（不是立绘模式，跳过立绘专属断言，只测待机漂移）')
+  }
 
   const shoot = async (name) => {
     const r = await cdp.send('Page.captureScreenshot', { format: 'png' })
@@ -197,23 +212,31 @@ async function main() {
     return { shown, path }
   }
 
-  await freezeIdle(true)
-  const closed = await setAndShoot('mouth-closed', 0)
-  console.log(`闭嘴   → ${closed.shown}`)
+  // 以下到 ramp 为止都是立绘专属（口型换图 / 眨眼换图），Live2D 没有这些概念
+  let closed = null
+  let half = null
+  let wide = null
+  let eyesOpen = null
+  let eyesClosed = null
+  if (portrait) {
+    await freezeIdle(true)
+    closed = await setAndShoot('mouth-closed', 0)
+    console.log(`闭嘴   → ${closed.shown}`)
 
-  const half = await setAndShoot('mouth-1', 0.3)
-  console.log(`半开   → ${half.shown}`)
+    half = await setAndShoot('mouth-1', 0.3)
+    console.log(`半开   → ${half.shown}`)
 
-  const wide = await setAndShoot('mouth-2', 0.9)
-  console.log(`大开   → ${wide.shown}`)
+    wide = await setAndShoot('mouth-2', 0.9)
+    console.log(`大开   → ${wide.shown}`)
 
-  await setMouth(0)
-  await freezeIdle(true)
-  const eyesOpen = await shoot('eyes-open')
+    await setMouth(0)
+    await freezeIdle(true)
+    eyesOpen = await shoot('eyes-open')
 
-  await freezeIdle(false)
-  const eyesClosed = await shoot('eyes-closed')
-  console.log(`闭眼   → ${JSON.stringify((await snapshot())?.shown ?? null)}`)
+    await freezeIdle(false)
+    eyesClosed = await shoot('eyes-closed')
+    console.log(`闭眼   → ${JSON.stringify((await snapshot())?.shown ?? null)}`)
+  }
 
   /*
    * 口型渐变：从「闭嘴」到「全开」取几个点各截一张。
@@ -223,18 +246,51 @@ async function main() {
    */
   await freezeIdle(true)
   const ramp = []
-  for (const m of [0, 0.15, 0.35, 0.6, 1.0]) {
-    await setMouth(m)
-    const shot = await shoot(`mouth-ramp-${String(m).replace('.', '_')}`)
-    const st = (await snapshot())?.shown
-    ramp.push({ mouthParam: m, shown: st, shot })
-    console.log(`开口度 ${m.toFixed(2)} → 差分#${st.mouthIndex} 纵向缩放 ${st.mouthScale.toFixed(3)}`)
+  if (portrait) {
+    for (const m of [0, 0.15, 0.35, 0.6, 1.0]) {
+      await setMouth(m)
+      const shot = await shoot(`mouth-ramp-${String(m).replace('.', '_')}`)
+      const st = (await snapshot())?.shown
+      ramp.push({ mouthParam: m, shown: st, shot })
+      console.log(`开口度 ${m.toFixed(2)} → 差分#${st.mouthIndex} 纵向缩放 ${st.mouthScale.toFixed(3)}`)
+    }
+    writeFileSync(join(OUT_DIR, 'ramp.json'), JSON.stringify(ramp, null, 2))
   }
-  writeFileSync(join(OUT_DIR, 'ramp.json'), JSON.stringify(ramp, null, 2))
 
-  shots.mouthClosed = closed.path
-  shots.mouth1 = half.path
-  shots.mouth2 = wide.path
+  /*
+   * 待机漂移：隔一段时间连拍若干张，交给外部逐像素比。
+   *
+   * 为什么要测这个：待机是**永远在跑**的，一旦旋转支点/幅度不对，
+   * 角色就会「一直在漂浮」（曾经就是这样：旋转绕画布左上角做，
+   * 微摆被放大成半径 1600px 的圆弧漂移）。判据不是"好不好看"，而是
+   * 「角色轮廓的上沿/下沿各漂了多少像素」——底沿应该几乎不动。
+   */
+  const idleSeries = async (factor, tag, frames = 8, gapMs = 260) => {
+    await freezeIdle(true)
+    // 解开冻结：用真的 IdleAnimator 才测得到待机本身
+    await evaluate(`(() => {
+      delete window.__nexusStage.idle.update
+      window.__nexusRuntime.idleRuntime.factor = ${factor}
+      return true
+    })()`)
+    await sleep(600)
+    const files = []
+    for (let i = 0; i < frames; i++) {
+      files.push(await shoot(`idle-${tag}-${i}`))
+      await sleep(gapMs)
+    }
+    return files
+  }
+
+  await setMouth(0)
+  const idleNormal = await idleSeries(1, 'normal')
+  const idleOff = await idleSeries(0, 'off')
+  console.log(`待机样本：normal ${idleNormal.length} 张、off ${idleOff.length} 张`)
+  writeFileSync(join(OUT_DIR, 'idle.json'), JSON.stringify({ idleNormal, idleOff }, null, 2))
+
+  shots.mouthClosed = closed?.path
+  shots.mouth1 = half?.path
+  shots.mouth2 = wide?.path
   shots.eyesOpen = eyesOpen
   shots.eyesClosed = eyesClosed
 

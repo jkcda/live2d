@@ -84,3 +84,57 @@ export function saveTTSConfig(cfg: TTSConfig): void {
 export function isLLMReady(cfg: LLMConfig): boolean {
   return Boolean(cfg.apiKey.trim() && cfg.baseURL.trim() && cfg.model.trim())
 }
+
+// ---------------------------------------------------------------- 待机动作
+
+/**
+ * 待机幅度。
+ *
+ * 为什么要做成设置：待机是**永远在跑**的底色，幅度只差一点点，观感差别巨大 ——
+ * 稍微大一点就像在飘，完全关掉又像贴图。这个只能本人看着调，代码里猜不准。
+ */
+export type IdleActivity = 'off' | 'calm' | 'normal'
+
+const IDLE_KEY = 'nexus.idle.activity'
+
+/** 幅度倍率：0 = 不动，1 = 标准 */
+export const IDLE_FACTOR: Record<IdleActivity, number> = {
+  off: 0,
+  calm: 0.45,
+  normal: 1,
+}
+
+export const IDLE_LABELS: Record<IdleActivity, string> = {
+  off: '静止（只眨眼）',
+  calm: '轻微',
+  normal: '标准',
+}
+
+export function loadIdleActivity(): IdleActivity {
+  try {
+    const raw = localStorage.getItem(IDLE_KEY)
+    if (raw === 'off' || raw === 'calm' || raw === 'normal') return raw
+  } catch {
+    // 读不到就用默认
+  }
+  return 'normal'
+}
+
+/**
+ * 当前幅度倍率。
+ *
+ * ★ 用可变对象而不是函数：渲染循环每帧都要读它，
+ *   而设置面板改了要**立刻**生效（不能靠刷新页面，那样调起来太难受）。
+ *   读一个对象的字段是零成本，读 localStorage 每帧就是自找麻烦。
+ */
+export const idleRuntime = { factor: IDLE_FACTOR[loadIdleActivity()] }
+
+export function setIdleActivity(value: IdleActivity): void {
+  idleRuntime.factor = IDLE_FACTOR[value]
+  try {
+    // 存原始字符串（不是 JSON），和 loadIdleActivity 的读法对齐
+    localStorage.setItem(IDLE_KEY, value)
+  } catch (err) {
+    console.warn('[settings] 保存待机幅度失败', err)
+  }
+}

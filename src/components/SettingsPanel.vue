@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import {
+  IDLE_LABELS,
   LLM_PRESETS,
+  loadIdleActivity,
   loadLLMConfig,
   loadTTSConfig,
   saveLLMConfig,
   saveTTSConfig,
+  setIdleActivity,
+  type IdleActivity,
 } from '@/core/settings'
 import {
   CHARACTER_LABELS,
@@ -33,6 +37,13 @@ const testing = ref(false)
 
 /** 角色渲染模式：Live2D 模型 / 立绘差分 */
 const characterKind = ref<CharacterKind>(loadCharacterKind())
+
+/**
+ * 待机幅度。和渲染模式不同，这个**不用刷新**：
+ * 渲染循环每帧读 `idleRuntime.factor`，改完立刻生效（调起来才不难受）。
+ */
+const idleActivity = ref<IdleActivity>(loadIdleActivity())
+watch(idleActivity, (v) => setIdleActivity(v))
 
 /**
  * 切换渲染模式。
@@ -206,6 +217,19 @@ async function trialTTS() {
             </option>
           </select>
         </label>
+        <label>
+          <span>待机动作</span>
+          <select v-model="idleActivity">
+            <option v-for="(label, key) in IDLE_LABELS" :key="key" :value="key">
+              {{ label }}
+            </option>
+          </select>
+        </label>
+        <p class="note">
+          待机是永远在跑的动作（呼吸浮动、身体微摆、视线游移），<b>眨眼不受影响</b> ——
+          幅度大一点就像在飘，完全关掉又像贴图，按自己看着舒服的调。
+          两种渲染方式都吃这个设置。
+        </p>
       </section>
 
       <section>

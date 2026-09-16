@@ -7,7 +7,8 @@ import type { CharacterFrame, CharacterStage } from '@/core/character/types'
 import { resolveModelUrl } from '@/core/live2d/models'
 import { classify } from '@/core/live2d/reactions'
 import { LipSyncDriver } from '@/core/live2d/lipsync'
-import { IdleAnimator } from '@/core/live2d/idle'
+import { IdleAnimator, type IdleFrame } from '@/core/live2d/idle'
+import { idleRuntime } from '@/core/settings'
 import { audioPlayer } from '@/core/runtime'
 
 /**
@@ -63,6 +64,30 @@ let pointer: { x: number; y: number } | null = null
 let lastHitAt = 0
 
 /**
+ * 按「待机幅度」设置衰减参数帧。
+ *
+ * 只衰减**动作**类参数（呼吸/视线/微摆），**不碰眼睛开合** ——
+ * 眨眼是「她活着」的最小信号，关掉待机也该保留，否则真成贴图了。
+ *
+ * 呼吸要绕 0.5 收缩而不是乘系数：ParamBreath 是 0~1 的半程值，
+ * 直接乘会让「关掉待机」变成一直吸气（停在 0，也就是呼气到底）。
+ */
+function dampIdle(f: IdleFrame, k: number): IdleFrame {
+  if (k === 1) return f
+  return {
+    ParamEyeLOpen: f.ParamEyeLOpen,
+    ParamEyeROpen: f.ParamEyeROpen,
+    ParamBreath: 0.5 + (f.ParamBreath - 0.5) * k,
+    ParamEyeBallX: f.ParamEyeBallX * k,
+    ParamEyeBallY: f.ParamEyeBallY * k,
+    ParamAngleX: f.ParamAngleX * k,
+    ParamAngleY: f.ParamAngleY * k,
+    ParamAngleZ: f.ParamAngleZ * k,
+    ParamBodyAngleX: f.ParamBodyAngleX * k,
+  }
+}
+
+/**
  * 每帧合成参数并交给渲染器。
  *
  * 参数是 Live2D 的参数名，但它们同时是**语义名**：
@@ -80,7 +105,7 @@ function frame(ts: number) {
   const idleFrame = idle.update(dt)
   const mouth = lipsync.update(audioPlayer.amplitude(), dt)
 
-  const next: CharacterFrame = { ...idleFrame, mouth }
+  const next: CharacterFrame = { ...dampIdle(idleFrame, idleRuntime.factor), mouth }
   stage.applyFrame(next)
 
   /*

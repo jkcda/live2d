@@ -169,6 +169,20 @@ export async function createPortraitStage(
   const contentHeightPx = content ? content.height * canvasH : canvasH
   const contentWidthPx = content ? content.width * canvasW : canvasW
 
+  /*
+   * ★ 旋转/缩放的支点 = 角色**底部中点**（腰或脚）。
+   *
+   * 这是踩过的坑：root 不设 pivot 时，旋转是绕**画布左上角 (0,0)** 做的，
+   * 而角色中心离那个角有 1600 多像素 —— 于是「微摆 ±2.8°」被当成半径 1600 的圆弧，
+   * 整个人横向漂 ±80 像素、纵向也跟着画圈，看起来就是**一直在漂浮**，
+   * 而不是站在原地轻微摇晃。呼吸缩放同理（绕角缩放会把底边推出去）。
+   *
+   * 绕底部中点就对了：脚（下半身边缘）钉住，上半身轻微晃，这才是待机该有的样子。
+   */
+  const pivotX = (content ? content.x + content.width / 2 : 0.5) * canvasW
+  const pivotY = (content ? content.y + content.height : 1) * canvasH
+  root.pivot.set(pivotX, pivotY)
+
   const layout = (width: number, height: number) => {
     if (width <= 0 || height <= 0) return
     viewW = width
@@ -179,10 +193,19 @@ export async function createPortraitStage(
     root.position.set((width - contentWidthPx * scale) / 2, height - (canvasH - (content?.y ?? 0) * canvasH) * scale)
   }
 
+  /*
+   * 待机幅度。
+   *
+   * 默认值调小过一轮：原来 bobPercent 1.2% / swayDegrees 2.2°，配上「绕画布角旋转」
+   * 那个 bug，看起来就像在飘。现在支点修对了（绕底部中点），幅度也收到
+   * 「能看出在呼吸、但不注意就看不出来」的程度 —— 待机不该抢戏。
+   * 嫌太静或太动，都能在 portrait.json 的 motion 里覆盖，或直接用
+   * 设置 → 角色 → 待机动作 整体加减。
+   */
   const motion = {
-    bobPercent: manifest.motion?.bobPercent ?? 0.012,
-    swayDegrees: manifest.motion?.swayDegrees ?? 2.2,
-    breatheScale: manifest.motion?.breatheScale ?? 0.006,
+    bobPercent: manifest.motion?.bobPercent ?? 0.004,
+    swayDegrees: manifest.motion?.swayDegrees ?? 0.8,
+    breatheScale: manifest.motion?.breatheScale ?? 0.004,
   }
 
   const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -199,7 +222,6 @@ export async function createPortraitStage(
     // 呼吸：上下浮动 + 轻微放大
     const bob = -breath * motion.bobPercent * contentHeightPx
     const breathe = 1 + breath * motion.breatheScale
-
     // 头部偏转：归一化 → 位移/旋转（单位是「度」，Pixi 用弧度）
     const yaw = frame.ParamAngleX / ANGLE_X_RANGE
     const tilt = frame.ParamAngleZ / ANGLE_Z_RANGE
@@ -221,12 +243,18 @@ export async function createPortraitStage(
       extraX = damp * 2
     }
 
+    /*
+     * 位置 = 基准位 + 缩放后支点的偏移。
+     * 因为设了 pivot，Pixi 画的是 position + R·S·(local - pivot)，
+     * 所以要把「支点本身也应落在基准位」这件事补回来，否则一设 pivot 整个角色会跳走。
+     */
+    const s = scale * breathe
     root.position.set(
-      (viewW - contentWidthPx * scale) / 2 + yaw * 0.012 * contentWidthPx * scale + extraX,
-      viewH - (canvasH - (content?.y ?? 0) * canvasH) * scale + bob + extraY,
+      (viewW - contentWidthPx * s) / 2 + yaw * 0.012 * contentWidthPx * s + extraX + pivotX * s,
+      viewH - (canvasH - (content?.y ?? 0) * canvasH) * s + bob + extraY + pivotY * s,
     )
     root.rotation = ((tilt * motion.swayDegrees + lean * 0.6 + extraRot) * Math.PI) / 180
-    root.scale.set(scale * breathe, scale * breathe)
+    root.scale.set(s, s)
 
     // 前发比身体动得多一点，看起来有惯性
     if (hairFront) {

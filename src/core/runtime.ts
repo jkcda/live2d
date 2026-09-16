@@ -8,7 +8,7 @@ import { AudioPlayer } from './audio/player'
 import { VoiceOutput, type TTSConfig } from './audio/tts'
 import { VoiceInput, type StreamEvent, type VoiceInputStatus } from './audio/stream'
 import { ChatSession } from './agent/session'
-import { loadLLMConfig, loadTTSConfig, saveTTSConfig } from './settings'
+import { idleRuntime, loadLLMConfig, loadTTSConfig, saveTTSConfig } from './settings'
 
 /** 全应用唯一的音频输出 */
 export const audioPlayer = new AudioPlayer()
@@ -99,6 +99,6 @@ export function applyTTSConfig(cfg: TTSConfig): void {
  */
 if (import.meta.env.DEV) {
   Object.assign(window as unknown as Record<string, unknown>, {
-    __nexusRuntime: { audioPlayer, voiceOutput, chatSession, voiceInput, bargeIn },
+    __nexusRuntime: { audioPlayer, voiceOutput, chatSession, voiceInput, bargeIn, idleRuntime },
   })
 }
