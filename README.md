@@ -121,9 +121,22 @@ public/models/
     └── textures/
 ```
 
-Cubism 官方有免费示例模型（Haru / Hiyori / Mao 等）可用于开发测试，去 Live2D 官网下载后解压到 `public/models/`。
+### 推荐模型
 
-**注意**：模型要支持口型参数 `ParamMouthOpenY`。选模型或自制模型时确认这一点，否则口型驱动无处落地。
+Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/sample/>
+
+下载后解压到 `public/models/`，然后改 `src/components/Live2DStage.vue` 里的 `MODEL_URL`。
+
+| 模型 | 说明 |
+|---|---|
+| **Hiyori Momose** | 最经典的标准模型，参数齐全，**首选** |
+| **Kei** | 官方为演示 motion-sync 而做，**专为真实口型同步设计** |
+| **Haru** | 标准模型，结构简单，适合先跑通 |
+| **Shizuku** | Shizuku Talk 同款 |
+
+**必须确认模型带 `ParamMouthOpenY` 参数** —— 这是口型驱动的落点，没有它整条口型链路无处可去。
+
+**许可**：这些模型可免费下载用于学习与开发，但各有条款（商用限制等），下载前请阅读官网说明。因此 `public/models/` 不入库。
 
 ---
 
