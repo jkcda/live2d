@@ -36,11 +36,15 @@ const BODY_ANGLE_RANGE = 2
  * 她整个人朝鼠标方向挪一点、再歪一点。这是 PNGTuber 的通行做法，
  * 效果比想象的强 —— 人眼对"她朝我这边转了"很敏感，对瞳孔那 3 像素反而迟钝。
  *
+ * ★ 平移只给一点点（0.7%），主要靠**绕腰倾斜**（GAZE_ROLL_DEG）。
+ *   第一版平移给了 1.4%，实测头动 ~25px、底边也跟着动 ~9px，
+ *   观感是"整个人在滑"而不是"她转过来了"——平移是滑，倾斜才是转。
+ *
  * 为什么用比例而不是像素：窗口大小差很多（浏览器全屏 vs 桌宠 420×640），
  * 写死像素在桌宠里会显得幅度巨大。
  */
-const GAZE_SHIFT_RATIO = 0.014
-const GAZE_LIFT_RATIO = 0.006
+const GAZE_SHIFT_RATIO = 0.007
+const GAZE_LIFT_RATIO = 0.003
 const GAZE_ROLL_DEG = 1.6
 
 /** 低于这个开口度就是「闭嘴」= 不叠任何差分 */

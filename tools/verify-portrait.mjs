@@ -321,13 +321,19 @@ async function main() {
   })()`)
   const anchor = await evaluate(`window.__nexusStage.stage.anchor('head')`)
   const moveTo = async (x, y) => {
-    await cdp.send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: Math.round(x),
-      y: Math.round(y),
-      button: 'none',
-      clickCount: 0,
-    })
+    const px = Math.round(x)
+    const py = Math.round(y)
+    // 派两次：第一次事件偶尔会落在刚隐藏的 UI 上，第二次才稳定命中角色（见上面那条注释）
+    for (let i = 0; i < 2; i++) {
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: px,
+        y: py,
+        button: 'none',
+        clickCount: 0,
+      })
+      await sleep(80)
+    }
   }
   /*
    * 采样点必须**落在窗口里**：第一版用了 ±420 / -260 的偏移，
@@ -347,6 +353,9 @@ async function main() {
     ['鼠标下', 0, 300],
   ]
   console.log(`窗口 ${viewport.w}×${viewport.h}，脸的余量：左右 ±${maxX.toFixed(0)}，上方 ${maxUp.toFixed(0)}`)
+  // 先走到静止位并等稳，再采基线 —— 否则基线本身带着上一次的位移，读出来的 Δ 全是偏的
+  await moveTo(anchor.x, anchor.y)
+  await sleep(900)
   for (const [label, ox, oy] of cases) {
     await moveTo(anchor.x + ox, anchor.y + oy)
     await sleep(700) // 平滑时间常数 130ms，700ms 足够收敛
