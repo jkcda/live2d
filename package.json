@@ -1,0 +1,44 @@
+{
+  "name": "nexus-live2d",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI desktop companion with Live2D, realtime voice and agent tooling",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "typecheck": "vue-tsc -b",
+    "preview": "vite preview",
+    "electron:build": "vite build && electron-builder",
+    "electron:pack": "vite build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@pixi/sound": "^6.0.1",
+    "pixi.js": "^8.13.1",
+    "untitled-pixi-live2d-engine": "^1.3.5",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/tsconfig": "^0.9.1",
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vite-plugin-electron": "^1.1.2",
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "vue-tsc": "^3.3.11"
+  },
+  "build": {
+    "appId": "com.nexus.live2d",
+    "productName": "NexusLive2D",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "dist-electron/**/*"],
+    "extraResources": [{ "from": "public/models", "to": "models" }],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}

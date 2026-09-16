@@ -1,0 +1,16 @@
+# 统一由 git 处理换行符，避免 Windows/macOS 协作时的全文件 diff
+* text=auto
+
+# 二进制资源
+*.moc3 binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+
+# 锁文件不要参与 diff 统计
+pnpm-lock.yaml -diff
