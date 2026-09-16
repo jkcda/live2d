@@ -87,3 +87,18 @@ export function reconfigureSession(): void {
 export function applyTTSConfig(cfg: TTSConfig): void {
   saveTTSConfig(cfg)
 }
+
+/*
+ * 开发期调试钩子。
+ *
+ * 为什么要暴露这些单例：Vite 在 HMR 下会给改动过的模块加 `?t=` 查询串，
+ * 于是从外部 `import('/src/core/runtime.ts')` 拿到的**未必是应用正在用的那个实例**
+ * —— 实例级补丁会打在一个没人用的副本上（而原型补丁看起来生效，更具迷惑性）。
+ * 排查播放队列、打断这类问题时必须拿到真身。
+ * 生产构建会被 import.meta.env.DEV 摇掉。
+ */
+if (import.meta.env.DEV) {
+  Object.assign(window as unknown as Record<string, unknown>, {
+    __nexusRuntime: { audioPlayer, voiceOutput, chatSession, voiceInput, bargeIn },
+  })
+}

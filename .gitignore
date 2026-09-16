@@ -14,12 +14,19 @@ public/models/*
 public/lib/*
 !public/lib/.gitkeep
 
+# ── 本地素材仓 ──
+# 官方 SDK 原始包、模型压缩包、Cubism 工程源文件（.can3/.cmo3）都放这里。
+# 这些都是「来源可再取、体积大、许可受限」的东西，不进仓库；
+# 也不能放 public/ 下 —— 那是会被 electron-builder 原样打进产物的目录。
+vendor/
+
 # ── Python 推理服务 ──
 python/.venv/
 python/venv/
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
 .pytest_cache/
 
 # 模型权重（几个 G，自己下）
