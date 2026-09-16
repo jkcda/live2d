@@ -78,7 +78,9 @@ def inscribed_ellipse(shape: tuple[int, int], bbox: tuple[int, int, int, int], g
     return ((xx - cx) / max(rx, 1)) ** 2 + ((yy - cy) / max(ry, 1)) ** 2 <= 1
 
 
-def find_irises(rgb: np.ndarray, alpha: np.ndarray, roi, sat_th: float, min_area: int) -> list[dict]:
+def find_irises(
+    rgb: np.ndarray, alpha: np.ndarray, roi, sat_th: float, min_area: int, mode: str = "core"
+) -> list[dict]:
     x0, y0, x1, y1 = roi
     sub = np.zeros(alpha.shape, dtype=bool)
     sub[y0:y1, x0:x1] = True
@@ -94,10 +96,24 @@ def find_irises(rgb: np.ndarray, alpha: np.ndarray, roi, sat_th: float, min_area
         if len(ys) < min_area:
             continue
         bx = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
-        mask = lab == i
-        mask = ndimage.binary_fill_holes(mask)
+        mask = ndimage.binary_fill_holes(lab == i)
         mask = ndimage.binary_closing(mask, iterations=2)
         mask &= inscribed_ellipse(alpha.shape, bx, 1.08)
+
+        if mode == "core":
+            # 只留瞳仁（暗核）。为什么要这个模式：这张图的虹膜几乎占满眼睛开口，
+            # 整块虹膜一动看起来就是"整只眼睛挪了"；只动瞳仁则是在虹膜内部滑动，
+            # 也就是大家期待的"只有瞳孔在动"。顺带纵向余量更大（虹膜内部比眼白宽松）。
+            core = mask & (val < 0.45)
+            if core.sum() < 40:
+                continue
+            core = ndimage.binary_fill_holes(core)  # 高光在瞳仁内部，要一起带走
+            core = ndimage.binary_closing(core, iterations=2)
+            ys2, xs2 = np.where(core)
+            cbx = (int(xs2.min()), int(ys2.min()), int(xs2.max()) + 1, int(ys2.max()) + 1)
+            core &= inscribed_ellipse(alpha.shape, cbx, 1.02)
+            mask = core
+
         out.append({"bbox": bx, "area": int(mask.sum()), "mask": mask, "raw": int(len(ys))})
     out.sort(key=lambda d: -d["area"])
     return out[:2]  # 最多两只眼睛
@@ -143,6 +159,7 @@ def main() -> None:
     ap.add_argument("--portrait", type=Path, default=DEFAULT_PORTRAIT)
     ap.add_argument("--saturation", type=float, default=0.30, help="虹膜的饱和度阈值")
     ap.add_argument("--min-area", type=int, default=200, help="小于这么多像素的色块当成噪点")
+    ap.add_argument("--mode", choices=["core","iris"], default="core", help="core=只动瞳仁（默认）iris=整块虹膜")
     ap.add_argument("--dilate", type=int, default=2, help="补洞范围在虹膜外再扩几像素")
     ap.add_argument("--preview", type=Path, default=DEFAULT_PREVIEW)
     ap.add_argument("--dry-run", action="store_true", help="只报告，不改动素材")
@@ -176,7 +193,7 @@ def main() -> None:
         print("⚠ 没找到 eyes_closed.png，用「角色上三分之一」当眼睛范围，可能不准")
 
     print(f"底图 {body.name} {img.size[0]}×{img.size[1]}｜眼睛范围 x[{roi[0]},{roi[2]}] y[{roi[1]},{roi[3]}]")
-    irises = find_irises(rgb, alpha, roi, args.saturation, args.min_area)
+    irises = find_irises(rgb, alpha, roi, args.saturation, args.min_area, args.mode)
     if not irises:
         raise SystemExit("没找到虹膜/瞳孔 —— 试试调低 --saturation")
 
