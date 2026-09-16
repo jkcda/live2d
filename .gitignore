@@ -14,6 +14,13 @@ public/models/*
 public/lib/*
 !public/lib/.gitkeep
 
+# 立绘素材同理：自己的角色立绘不入库
+public/portrait/*
+!public/portrait/.gitkeep
+# 但占位角色要入库 —— 它是照着写的参考例（`docs/portrait-assets.md` 里引用了它）
+!public/portrait/_placeholder/
+!public/portrait/_placeholder/**
+
 # ── 本地素材仓 ──
 # 官方 SDK 原始包、模型压缩包、Cubism 工程源文件（.can3/.cmo3）都放这里。
 # 这些都是「来源可再取、体积大、许可受限」的东西，不进仓库；
@@ -49,3 +56,6 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ── 会话上传的临时文件（用户拖进来的图等）──
+.dsh-uploads/

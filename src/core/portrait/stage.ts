@@ -1,0 +1,295 @@
+/**
+ * 立绘（PNGTuber）渲染层。
+ *
+ * 与 Live2D 渲染层实现同一个 `CharacterStage` 接口，所以交互逻辑完全复用：
+ * 悬浮判定、点击反应、口型、待机都是同一套代码，只是「参数帧」的解释方式不同。
+ *
+ * Live2D：参数写进模型，由 Cubism 算出形变。
+ * 立绘：参数被当成**语义**解释 ——
+ *   呼吸 → 上下浮动 + 轻微缩放
+ *   头部偏转 → 位移 + 旋转
+ *   口型 → 换嘴差分（没有差分就拉伸下巴）
+ *   眨眼 → 换眼差分
+ *
+ * 这是 PNGTuber 的通行做法：离散换图，不做形变。看起来「够活」，成本几乎为零。
+ */
+
+import { Application, Container, Sprite } from 'pixi.js'
+import type { CharacterAbilities, CharacterFrame, CharacterStage } from '../character/types'
+import {
+  buildAlphaMask,
+  loadPortrait,
+  splitAtJaw,
+  type PortraitManifest,
+} from './assets'
+
+/** idle.ts 里各参数的标称幅度，用来把参数归一化成 0~1 再映射到位移/旋转 */
+const ANGLE_X_RANGE = 4
+const ANGLE_Z_RANGE = 1.4
+const BODY_ANGLE_RANGE = 2
+
+export interface PortraitStageOptions {
+  /** 素材目录，默认 `portrait` */
+  baseUrl?: string
+}
+
+export async function createPortraitStage(
+  host: HTMLElement,
+  opts: PortraitStageOptions = {},
+): Promise<CharacterStage> {
+  const assets = await loadPortrait(opts.baseUrl ?? 'portrait')
+  const manifest = assets.manifest
+  const canvasW = manifest.canvas.width
+  const canvasH = manifest.canvas.height
+
+  const app = new Application()
+  await app.init({
+    backgroundAlpha: 0,
+    antialias: true,
+    preference: 'webgl',
+    resolution: window.devicePixelRatio || 1,
+    autoDensity: true,
+    resizeTo: host,
+  })
+  host.appendChild(app.canvas)
+
+  // ── 图层。z 顺序靠 addChild 顺序决定
+  const root = new Container()
+  app.stage.addChild(root)
+
+  if (assets.hairBack) root.addChild(new Sprite(assets.hairBack))
+
+  /*
+   * 底图：有嘴差分就整张放；没有就沿下巴分界线切成两半，靠拉伸下半张做张嘴。
+   * 拉伸而不是平移，是为了不露出断口。
+   */
+  const mouthStates = assets.mouths
+  const hasMouthArt = mouthStates.length > 0
+  const jawLineRatio = manifest.jawLine ?? 0.5
+
+  let jaw: Container | null = null
+  if (hasMouthArt) {
+    root.addChild(new Sprite(assets.body))
+  } else {
+    const { upper, lower, jawY } = splitAtJaw(assets.body, canvasH * jawLineRatio)
+    root.addChild(new Sprite(upper))
+    jaw = new Container()
+    jaw.position.set(0, jawY)
+    const lowerSprite = new Sprite(lower)
+    lowerSprite.position.set(0, 0)
+    jaw.addChild(lowerSprite)
+    root.addChild(jaw)
+  }
+
+  const eyes = assets.eyesOpen ? new Sprite(assets.eyesOpen) : null
+  if (eyes) root.addChild(eyes)
+
+  const mouth = hasMouthArt ? new Sprite(mouthStates[0]) : null
+  if (mouth) root.addChild(mouth)
+
+  const hairFront = assets.hairFront ? new Sprite(assets.hairFront) : null
+  if (hairFront) root.addChild(hairFront)
+
+  // ── 程序化反应：点她之后的弹跳/歪头
+  let reactionUntil = 0
+  let reactionKind: 'head' | 'body' = 'body'
+
+  // ── 轮廓遮罩
+  const mask = await buildAlphaMask(assets)
+  /** 底图是不是整张不透明（没抠背景）—— 见 hitTest 里的退化处理 */
+  const maskOpaque = mask.opaqueRatio > 0.9
+  if (maskOpaque && import.meta.env.DEV) {
+    console.warn(
+      `[portrait] 底图看起来没有透明背景（不透明像素占 ${(mask.opaqueRatio * 100).toFixed(0)}%），` +
+        '轮廓判定会退化成矩形。建议把背景抠掉，否则桌宠的「只有她身上才响应」会失效。',
+    )
+  }
+
+  // ── 布局
+  let viewW = app.renderer.width
+  let viewH = app.renderer.height
+  let scale = 1
+
+  const content = manifest.content
+  const contentHeightPx = content ? content.height * canvasH : canvasH
+  const contentWidthPx = content ? content.width * canvasW : canvasW
+
+  const layout = (width: number, height: number) => {
+    if (width <= 0 || height <= 0) return
+    viewW = width
+    viewH = height
+    scale = height / contentHeightPx
+    root.scale.set(scale)
+    // 锚在底边居中：与 Live2D 那边的取景保持一致
+    root.position.set((width - contentWidthPx * scale) / 2, height - (canvasH - (content?.y ?? 0) * canvasH) * scale)
+  }
+
+  const motion = {
+    bobPercent: manifest.motion?.bobPercent ?? 0.012,
+    swayDegrees: manifest.motion?.swayDegrees ?? 2.2,
+    breatheScale: manifest.motion?.breatheScale ?? 0.006,
+  }
+
+  const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
+
+  /** 当前显示的嘴型索引 / 眼睛状态 —— 换图是离散的，出问题时必须能一眼看出换到了哪张 */
+  const shown = { mouthIndex: -1, eyesOpen: true, jawStretch: 1 }
+
+  const applyFrame = (frame: CharacterFrame) => {
+    const breath = clamp01(frame.ParamBreath)
+    const now = performance.now()
+    const reacting = now < reactionUntil
+    const reactPhase = reacting ? (reactionUntil - now) / 420 : 0
+
+    // 呼吸：上下浮动 + 轻微放大
+    const bob = -breath * motion.bobPercent * contentHeightPx
+    const breathe = 1 + breath * motion.breatheScale
+
+    // 头部偏转：归一化 → 位移/旋转（单位是「度」，Pixi 用弧度）
+    const yaw = frame.ParamAngleX / ANGLE_X_RANGE
+    const tilt = frame.ParamAngleZ / ANGLE_Z_RANGE
+    const lean = frame.ParamBodyAngleX / BODY_ANGLE_RANGE
+
+    let extraRot = 0
+    let extraY = 0
+    let extraX = 0
+    if (reacting) {
+      // 摸头：点头示意（前后小幅摆动）；戳身体：弹一下
+      const damp = Math.sin(reactPhase * Math.PI * 3) * reactPhase
+      if (reactionKind === 'head') {
+        extraRot = damp * 4
+        extraY = -Math.abs(damp) * 6
+      } else {
+        extraY = -Math.abs(damp) * 14
+        extraRot = damp * 2
+      }
+      extraX = damp * 2
+    }
+
+    root.position.set(
+      (viewW - contentWidthPx * scale) / 2 + yaw * 0.012 * contentWidthPx * scale + extraX,
+      viewH - (canvasH - (content?.y ?? 0) * canvasH) * scale + bob + extraY,
+    )
+    root.rotation = ((tilt * motion.swayDegrees + lean * 0.6 + extraRot) * Math.PI) / 180
+    root.scale.set(scale * breathe, scale * breathe)
+
+    // 前发比身体动得多一点，看起来有惯性
+    if (hairFront) {
+      hairFront.position.set(tilt * 3 + extraX * 0.5, breath * 2)
+    }
+
+    // 眨眼：换图（没有眼差分就什么都不做）
+    if (eyes && assets.eyesClosed) {
+      const open = (frame.ParamEyeLOpen + frame.ParamEyeROpen) / 2
+      shown.eyesOpen = open >= 0.5
+      eyes.texture = shown.eyesOpen ? assets.eyesOpen! : assets.eyesClosed
+    }
+
+    // 口型
+    const m = clamp01(frame.mouth)
+    if (mouth && mouthStates.length) {
+      // 离散换图：0 闭 / 1 半开 / 2 以上大开
+      const idx = m < 0.12 ? 0 : m < 0.55 ? Math.min(1, mouthStates.length - 1) : mouthStates.length - 1
+      shown.mouthIndex = idx
+      mouth.texture = mouthStates[idx]
+    } else if (jaw) {
+      // 没嘴差分：拉伸下半张脸代替张嘴（幅度刻意克制，不然会像橡皮）
+      shown.jawStretch = 1 + m * 0.05
+      jaw.scale.set(1, shown.jawStretch)
+    }
+  }
+
+  const hitTest = (clientX: number, clientY: number): boolean => {
+    const rect = app.canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+    // 屏幕 → 画布比例坐标
+    const nx = (clientX - rect.left) / rect.width
+    const ny = (clientY - rect.top) / rect.height
+    if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return false
+
+    /*
+     * 底图没有透明背景时（整张图都是不透明的），像素遮罩会变成「处处都命中」，
+     * 轮廓判定就失去意义了。这时退化成「角色包围盒」矩形判定 ——
+     * 虽然不精确，但至少不会让整块窗口都吃掉鼠标事件。
+     */
+    if (maskOpaque) {
+      const c = manifest.content
+      if (!c) return true
+      return nx >= c.x && nx <= c.x + c.width && ny >= c.y && ny <= c.y + c.height
+    }
+
+    // 画布比例 → 遮罩坐标（遮罩覆盖整张画布）
+    const mx = Math.min(mask.width - 1, Math.max(0, Math.round(nx * mask.width)))
+    const my = Math.min(mask.height - 1, Math.max(0, Math.round(ny * mask.height)))
+    return mask.alpha[my * mask.width + mx] > 40
+  }
+
+  const hitAreaAt = (clientX: number, clientY: number): string[] => {
+    const rect = app.canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return []
+    const nx = (clientX - rect.left) / rect.width
+    const ny = (clientY - rect.top) / rect.height
+
+    const regions = manifest.regions ?? {}
+    const hits: string[] = []
+    for (const [name, r] of Object.entries(regions)) {
+      if (nx >= r.x && nx <= r.x + r.width && ny >= r.y && ny <= r.y + r.height) {
+        hits.push(name)
+      }
+    }
+    return hits
+  }
+
+  const abilities: CharacterAbilities = {
+    lipSyncParams: [],
+    expressionNames: [],
+    motionGroups: {},
+  }
+
+  const stage: CharacterStage = {
+    kind: 'portrait',
+    abilities,
+    layout,
+    applyFrame,
+    hitTest,
+    hitAreaAt,
+    react(areas: string[]) {
+      reactionKind = areas[0] === 'Head' ? 'head' : 'body'
+      reactionUntil = performance.now() + 420
+      if (import.meta.env.DEV) {
+        console.debug(`[stage] 被点了 ${JSON.stringify({ areas, reaction: reactionKind })}`)
+        Object.assign(window as unknown as Record<string, unknown>, {
+          __nexusLastPoke: { areas, reaction: reactionKind },
+        })
+      }
+    },
+    destroy() {
+      app.destroy(true, { children: true })
+    },
+  }
+
+  layout(app.renderer.width, app.renderer.height)
+
+  if (import.meta.env.DEV) {
+    Object.assign(window as unknown as Record<string, unknown>, {
+      __nexusPortrait: {
+        stage,
+        manifest: manifest as PortraitManifest,
+        /** 当前显示的嘴型/眼睛状态，便于自动化断言 */
+        shown,
+        counts: {
+          mouths: mouthStates.length,
+          hasEyes: !!assets.eyesClosed,
+          hasHairFront: !!hairFront,
+          hasHairBack: !!assets.hairBack,
+          /** 闭嘴/睁眼是用「不叠加」补的（底图本身就是那个状态） */
+          derivedClosedMouth: assets.derivedClosedMouth,
+          derivedOpenEyes: assets.derivedOpenEyes,
+        },
+        mask,
+      },
+    })
+  }
+
+  return stage
+}

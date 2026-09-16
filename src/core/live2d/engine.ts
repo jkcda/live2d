@@ -68,10 +68,44 @@ export interface ModelHandle {
   setParam(name: string, value: number): void
   /** 批量设置参数 */
   setParams(params: Record<string, number>): void
-  /** 播放动作组；动作不存在时静默失败 */
-  playMotion(group: string, index?: number): void
+  /**
+   * 播放动作组。
+   *
+   * 行为刻意固定成「**单次播放 + 立即抢占**」，两个都是踩出来的：
+   *
+   * ① 模型文件里普遍标着 `Loop: true`（Haru 的 TapBody 四段全是），
+   *    不覆盖的话点一下她就**永远重复**同一个动作 —— 用户看到的是「一直鞠躬」。
+   * ② 默认优先级下，动作未播完时新动作只会**排队**：连点几下就堆成一长串，
+   *    她会连续演好几分钟。反应类动作应该即时响应，所以用 FORCE 抢占。
+   *
+   * @param onFinish 动作播完（或被抢占）时回调 —— 上层用它复位表情
+   */
+  playMotion(group: string, index?: number, onFinish?: () => void): void
   /** 切换表情 */
   setExpression(id: string): void
+  /** 复位表情（回到模型默认） */
+  resetExpression(): void
+
+  /* ── 能力查询：换模型后动作/表情/口型的落点都不同，必须问模型而不是写死 ── */
+
+  /**
+   * 模型声明的口型参数。
+   *
+   * 不能写死 ParamMouthOpenY —— Mao 的 LipSync 组指向的是 ParamA，
+   * 写死的话在那个模型上嘴巴完全不动（而且不报错，纯静默失效）。
+   */
+  readonly lipSyncParams: string[]
+  /** 表情名列表（miara 这类没做表情的模型会返回空数组） */
+  readonly expressionNames: string[]
+  /** 每个表情驱动了哪些参数 —— 上层据此推断情绪（见 reactions.ts） */
+  readonly expressionDrives: Array<{ name: string; drives: Array<{ id: string; value: number }> }>
+  /** 动作组 → 动作数量 */
+  readonly motionGroups: Record<string, number>
+  /**
+   * 屏幕坐标落在哪个命中区（Head / Body …）。
+   * 依赖模型自带的 HitAreas；模型没定义时返回空数组。
+   */
+  hitAreaAt(clientX: number, clientY: number): string[]
 }
 
 export interface Stage {
@@ -79,6 +113,13 @@ export interface Stage {
   model: ModelHandle
   /** 容器尺寸变化后重新布局（等比缩放 + 底部居中） */
   layout(width: number, height: number): void
+  /**
+   * 屏幕坐标是否落在角色**轮廓**上（不是包围盒）。
+   *
+   * 用途：桌宠的「鼠标悬浮才浮现 UI」和「非角色区域点击穿透」都依赖它。
+   * 不能退化成矩形判定 —— 角色画布大部分是透明的，矩形判定等于永远命中。
+   */
+  hitTest(clientX: number, clientY: number): boolean
   destroy(): void
 }
 
@@ -127,6 +168,52 @@ function resolveCoreModel(model: Live2DModel): CoreModelLike | null {
   return null
 }
 
+/**
+ * 抓取并解析每个表情文件，得出「这个表情驱动了哪些参数」。
+ *
+ * 为什么要自己去抓：引擎的 expressionManager.definitions 里只有 {Name, File}，
+ * 参数表在**加载后的**表情对象里，而表情是懒加载的 —— 想提前知道语义，
+ * 只能自己读 exp3.json。文件很小（每个 1KB 量级）且走本地 dev server。
+ *
+ * 上层用它推断情绪（见 reactions.ts），这样「摸头给笑脸」不用写死表情名。
+ */
+async function loadExpressionDrives(
+  definitions: Array<{ Name?: string; name?: string; File?: string; file?: string }> | undefined,
+  modelUrl: string,
+): Promise<Array<{ name: string; drives: Array<{ id: string; value: number }> }>> {
+  if (!Array.isArray(definitions) || !definitions.length) return []
+
+  const base = modelUrl.slice(0, modelUrl.lastIndexOf('/') + 1)
+
+  const results = await Promise.all(
+    definitions.map(async (spec) => {
+      const name = spec?.Name ?? spec?.name ?? ''
+      const file = spec?.File ?? spec?.file
+      if (!name || !file) return { name, drives: [] }
+
+      try {
+        const resp = await fetch(base + file)
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const json = (await resp.json()) as {
+          Parameters?: Array<{ Id?: string; Value?: number }>
+        }
+        return {
+          name,
+          drives: (json.Parameters ?? [])
+            .filter((p) => typeof p?.Id === 'string')
+            .map((p) => ({ id: p.Id as string, value: Number(p.Value ?? 0) })),
+        }
+      } catch (err) {
+        // 单个表情文件读不到不该让整个舞台挂掉
+        console.warn(`[live2d] 读不到表情文件 ${file}`, err)
+        return { name, drives: [] }
+      }
+    }),
+  )
+
+  return results.filter((r) => r.name)
+}
+
 export async function createStage(host: HTMLElement, opts: CreateStageOptions): Promise<Stage> {
   // ★ 顺序不能变：
   //   1. 先把 Cubism Core 挂到 window（引擎模块求值时就会检查它）
@@ -134,7 +221,7 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
   //   3. 最后才建 Application
   await ensureCubismCore()
 
-  const { Live2DModel: Model, Live2DPlugin } = await loadEngine()
+  const { Live2DModel: Model, Live2DPlugin, MotionPriority } = await loadEngine()
   registerLive2DPlugin(Live2DPlugin)
 
   const app = new Application()
@@ -146,6 +233,12 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
     resizeTo: host,
+    /*
+     * 必须保留绘制缓冲，否则 hitTest 读不到像素。
+     * （默认 false 时浏览器可以在合成后随时清空缓冲，readPixels 只会读到全透明。）
+     * 代价是驱动少了一项优化，对这种小窗口可以忽略。
+     */
+    preserveDrawingBuffer: true,
   })
   host.appendChild(app.canvas)
 
@@ -211,6 +304,35 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
     core.setParameterValueById(name, value)
   }
 
+  /*
+   * 我们实际依赖的 internalModel 成员。
+   * 这些在抽象基类 InternalModel 上没有声明（在具体实现类上），所以显式接一下 ——
+   * 顺带把「依赖了哪些非公开面」写在代码里，升级引擎时好核对。
+   */
+  interface InternalModelLike {
+    hitTest(x: number, y: number): string[]
+    motionManager: {
+      /** 模型 Groups.LipSync 声明的口型参数（CubismMotionManager 上的字段） */
+      lipSyncIds?: string[]
+      definitions?: Record<string, unknown[]>
+      expressionManager?: {
+        definitions?: Array<{
+          Name?: string
+          name?: string
+          Parameters?: Array<{ Id?: string; Value?: number }>
+        }>
+        resetExpression?: () => void
+      }
+    }
+  }
+  const im = model.internalModel as unknown as InternalModelLike
+
+  // 表情的参数表要自己去抓（引擎的定义里只有文件名）
+  const expressionDrives = await loadExpressionDrives(
+    im.motionManager.expressionManager?.definitions,
+    opts.url,
+  )
+
   const handle: ModelHandle = {
     setParam(name, value) {
       writeParam(name, value)
@@ -221,11 +343,44 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
         writeParam(name, params[name])
       }
     },
-    playMotion(group, index) {
-      void model.motion(group, index)
+    playMotion(group, index, onFinish) {
+      void model.motion(group, index, MotionPriority.FORCE, { loop: false, onFinish })
     },
     setExpression(id) {
       void model.expression(id)
+    },
+    resetExpression() {
+      // miara 这类没做表情的模型没有 expressionManager，需容错
+      im.motionManager.expressionManager?.resetExpression?.()
+    },
+
+    get lipSyncParams() {
+      // 注意层级：在 motionManager 上，不在 internalModel 上
+      return im.motionManager.lipSyncIds ?? []
+    },
+    get expressionNames() {
+      const defs = im.motionManager.expressionManager?.definitions
+      if (!Array.isArray(defs)) return []
+      return defs
+        .map((d) => d?.Name ?? d?.name)
+        .filter((n): n is string => typeof n === 'string')
+    },
+    get expressionDrives() {
+      return expressionDrives
+    },
+    get motionGroups() {
+      const defs = im.motionManager.definitions
+      if (!defs) return {}
+      const out: Record<string, number> = {}
+      for (const [group, list] of Object.entries(defs)) {
+        out[group] = Array.isArray(list) ? list.length : 0
+      }
+      return out
+    },
+    hitAreaAt(clientX, clientY) {
+      // 命中区判定要的是**模型画布坐标**：先把屏幕点反变换回模型本地坐标
+      const local = model.toLocal({ x: clientX, y: clientY })
+      return im.hitTest(local.x, local.y)
     },
   }
 
@@ -277,10 +432,46 @@ export async function createStage(host: HTMLElement, opts: CreateStageOptions): 
 
   layout(app.renderer.width, app.renderer.height)
 
+  /*
+   * 轮廓命中：采样指针所在的那一个像素的 alpha。
+   *
+   * 为什么不用引擎的 hitTest(x, y)：它依赖模型的 HitAreas，
+   * 而 miara 的 HitAreas 是空数组 —— 一个都命不中。
+   * 再说了，HitAreas 是「头/身体」这种交互区，不是轮廓；
+   * 悬浮浮现和点击穿透要的恰恰是**整条轮廓**。
+   *
+   * 坐标要转两次：
+   *   1. 屏幕坐标 → 画布内像素（乘 devicePixelRatio，因为 resolution 设了它）
+   *   2. y 轴翻转 —— readPixels 的原点在**左下角**，DOM 在左上角
+   */
+  const pixel = new Uint8Array(4)
+
+  const hitTest = (clientX: number, clientY: number): boolean => {
+    const renderer = app.renderer as unknown as { gl?: WebGL2RenderingContext }
+    const gl = renderer.gl
+    if (!gl) return false
+
+    const rect = app.canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+
+    const dpr = window.devicePixelRatio || 1
+    const px = Math.floor((clientX - rect.left) * dpr)
+    const py = Math.floor((rect.bottom - clientY) * dpr)
+
+    if (px < 0 || py < 0 || px >= gl.drawingBufferWidth || py >= gl.drawingBufferHeight) {
+      return false
+    }
+
+    gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel)
+    // 抗锯齿边缘会有很低的 alpha，给个下限免得把边缘算成命中
+    return pixel[3] > 12
+  }
+
   return {
     app,
     model: handle,
     layout,
+    hitTest,
     destroy() {
       app.destroy(true, { children: true })
     },

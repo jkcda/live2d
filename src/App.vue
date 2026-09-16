@@ -1,24 +1,71 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import Live2DStage from './components/Live2DStage.vue'
+import { computed, onUnmounted, onMounted, ref } from 'vue'
+import CharacterStage from './components/CharacterStage.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import { chatSession, voiceOutput } from './core/runtime'
 
 const version = ref('0.1.0')
 const passthrough = ref(false)
-const showBar = ref(true)
 const showChat = ref(false)
 const showSettings = ref(false)
 
 /** 有没有 Electron 桥。没有就是浏览器里跑，窗口控制按钮点了也没用，直接不显示。 */
 const isDesktop = Boolean(window.nexus)
 
+/*
+ * 控制条按桌宠的规矩来：平时不出现，鼠标移到她身上才浮现，移开就收起来。
+ *
+ * 为什么要有「隐藏延迟」：从小人移到控制条上时，中间会经过一段不属于她的区域，
+ * 立刻隐藏的话控制条会在你要点它的瞬间消失。延迟窗口足够跨过那段间隙。
+ */
+const hoveringCharacter = ref(false)
+const barRevealed = ref(false)
+let hideTimer: number | undefined
+
+/**
+ * 面板开着的时候控制条不能收 —— 否则设置面板会突然失去入口
+ */
+const barPinned = computed(() => showChat.value || showSettings.value)
+
+/**
+ * 移开角色后延迟多久收起。
+ *
+ * 600ms 不是随手定的：控制条在底部、角色在中间，人把鼠标移过去要几百毫秒，
+ * 延迟太短就会「刚要点击它先消失」。这条和 CharacterStage 里测试条的迟滞同一个道理。
+ */
+const BAR_HIDE_DELAY_MS = 600
+
+function revealBar() {
+  window.clearTimeout(hideTimer)
+  barRevealed.value = true
+}
+
+function scheduleHideBar() {
+  if (barPinned.value) return
+  window.clearTimeout(hideTimer)
+  hideTimer = window.setTimeout(() => {
+    barRevealed.value = false
+  }, BAR_HIDE_DELAY_MS)
+}
+
+function onCharacterHover(on: boolean) {
+  hoveringCharacter.value = on
+  if (on) revealBar()
+  else scheduleHideBar()
+}
+
+const showBar = computed(
+  () => !passthrough.value && (barRevealed.value || barPinned.value),
+)
+
 onMounted(async () => {
   if (window.nexus) {
     version.value = await window.nexus.version()
   }
 })
+
+onUnmounted(() => window.clearTimeout(hideTimer))
 
 /** 切换点击穿透：穿透后鼠标事件直接落到桌面上 */
 async function togglePassthrough() {
@@ -29,14 +76,18 @@ async function togglePassthrough() {
 function toggleChat() {
   showChat.value = !showChat.value
   if (showChat.value) showSettings.value = false
+  if (showChat.value) revealBar()
+  else scheduleHideBar()
 }
 
 function openSettings() {
   showSettings.value = true
+  revealBar()
 }
 
 function closeSettings() {
   showSettings.value = false
+  scheduleHideBar()
 }
 
 /** 隐藏角色时把没说完的话一并掐掉，避免只闻其声不见其人 */
@@ -56,14 +107,14 @@ async function quit() {
 <template>
   <div class="app" :class="{ passthrough }">
     <!-- 顶部拖动条：唯一可拖动窗口的区域，避免和角色交互打架 -->
-    <div class="title-strip drag-handle" @mouseenter="showBar = true" />
+    <div class="title-strip drag-handle" @mouseenter="revealBar" />
 
     <main class="stage-area">
-      <Live2DStage />
+      <CharacterStage @hover="onCharacterHover" />
 
       <Transition name="slide">
         <div v-if="showChat && !passthrough" class="chat-slot">
-          <ChatPanel @close="showChat = false" @settings="openSettings" />
+          <ChatPanel @close="toggleChat" @settings="openSettings" />
         </div>
       </Transition>
 
@@ -76,9 +127,11 @@ async function quit() {
 
     <Transition name="bar">
       <div
-        v-if="showBar && !passthrough && !showSettings"
+        v-if="showBar && !showSettings"
         class="control-bar no-drag"
         :class="{ 'above-chat': showChat }"
+        @mouseenter="revealBar"
+        @mouseleave="scheduleHideBar"
       >
         <span class="version">v{{ version }}</span>
         <button class="btn" :class="{ on: showChat }" @click="toggleChat">对话</button>

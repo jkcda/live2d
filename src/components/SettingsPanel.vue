@@ -7,6 +7,12 @@ import {
   saveLLMConfig,
   saveTTSConfig,
 } from '@/core/settings'
+import {
+  CHARACTER_LABELS,
+  loadCharacterKind,
+  saveCharacterKind,
+  type CharacterKind,
+} from '@/core/character/mode'
 import { reconfigureSession, voiceOutput } from '@/core/runtime'
 import { streamChat } from '@/core/agent/llm'
 
@@ -24,6 +30,20 @@ const ttsSpeed = ref(1)
 const llmTest = ref('')
 const ttsTest = ref('')
 const testing = ref(false)
+
+/** 角色渲染模式：Live2D 模型 / 立绘差分 */
+const characterKind = ref<CharacterKind>(loadCharacterKind())
+
+/**
+ * 切换渲染模式。
+ *
+ * 两种渲染器创建的 Pixi 舞台不一样，热切换要重建整个舞台 ——
+ * 直接刷新页面最稳，也避免留下半初始化的画布。
+ */
+function onCharacterKindChange() {
+  saveCharacterKind(characterKind.value)
+  window.location.reload()
+}
 
 onMounted(() => {
   const llm = loadLLMConfig()
@@ -172,6 +192,22 @@ async function trialTTS() {
     </header>
 
     <div class="body">
+      <section>
+        <h3>角色</h3>
+        <p class="note">
+          立绘模式用几张差分图（嘴/眼）就能换成自己的角色，素材放
+          <code>public/portrait/</code>；Live2D 模型放 <code>public/models/</code>。
+        </p>
+        <label>
+          <span>渲染方式</span>
+          <select v-model="characterKind" @change="onCharacterKindChange">
+            <option v-for="(label, key) in CHARACTER_LABELS" :key="key" :value="key">
+              {{ label }}
+            </option>
+          </select>
+        </label>
+      </section>
+
       <section>
         <h3>对话模型</h3>
 
@@ -367,7 +403,8 @@ label > span {
 
 input[type='text'],
 input[type='password'],
-input:not([type]) {
+input:not([type]),
+select {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -380,7 +417,13 @@ input:not([type]) {
   outline: none;
 }
 
-input:focus {
+select {
+  /* 下拉里的选项由系统绘制，不设背景会出现白底黑字和其他控件不一致 */
+  background-color: #24242a;
+}
+
+input:focus,
+select:focus {
   border-color: rgba(120, 150, 220, 0.55);
 }
 

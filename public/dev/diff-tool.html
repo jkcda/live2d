@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>立绘差分工具 · Nexus Live2D</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 18px;
+        font: 13px/1.7 'Microsoft YaHei', system-ui, sans-serif;
+        background: #16161a; color: #d8d8dc;
+      }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      .sub { color: #8a8a92; margin-bottom: 14px; }
+      .wrap { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+      .stage { position: relative; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; background:
+        repeating-conic-gradient(#232329 0% 25%, #1c1c22 0% 50%) 50% / 16px 16px; }
+      canvas { display: block; border-radius: 8px; cursor: crosshair; }
+      .side { width: 340px; }
+      fieldset { border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+      legend { color: #9aa0b0; padding: 0 4px; }
+      button, label.file {
+        font: inherit; color: #d8d8dc; background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;
+        padding: 4px 10px; cursor: pointer;
+      }
+      button:hover, label.file:hover { background: rgba(255,255,255,0.16); }
+      button.on { background: rgba(90,120,200,0.55); }
+      button:disabled { opacity: .4; cursor: not-allowed; }
+      .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+      input[type='file'] { display: none; }
+      code, pre { font-family: Consolas, monospace; font-size: 11px; }
+      pre { background: rgba(0,0,0,0.35); padding: 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
+      .hint { color: #7a7a84; font-size: 12px; }
+      .warn { color: #d0a050; }
+      ol { padding-left: 18px; margin: 6px 0; }
+      li { margin: 3px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>立绘差分工具</h1>
+    <div class="sub">
+      给 AI 局部重绘准备裁剪框，并把 AI 的结果合成为可直接用的差分图（整画布尺寸、只保留该区域、边缘羽化）。
+    </div>
+
+    <div class="wrap">
+      <div class="stage"><canvas id="cv" width="560" height="740"></canvas></div>
+
+      <div class="side">
+        <fieldset>
+          <legend>1 · 底图</legend>
+          <div class="row">
+            <label class="file"><input type="file" id="pick" accept="image/png,image/webp" />选择 PNG…</label>
+            <button id="loadDefault">载入 portrait/body.png</button>
+          </div>
+          <div class="hint" id="imgInfo">未载入</div>
+        </fieldset>
+
+        <fieldset>
+          <legend>2 · 框选部位</legend>
+          <div class="row">
+            <button data-slot="mouth" class="slot on">嘴</button>
+            <button data-slot="eyes" class="slot">眼</button>
+          </div>
+          <div class="hint">在图上拖出矩形。含整只眼睛/整张嘴，左右眼要一起框进去。</div>
+          <pre id="boxes">（还没框选）</pre>
+          <div class="row">
+            <button id="exportCrop" disabled>导出裁剪图（给 AI）</button>
+          </div>
+          <div class="row">
+            <span class="hint">边距</span>
+            <input type="number" id="padPct" value="50" min="0" max="300" step="10" style="width:64px" />
+            <span class="hint">% · 放大</span>
+            <input type="number" id="upScale" value="4" min="1" max="8" step="1" style="width:56px" />
+            <span class="hint">×</span>
+          </div>
+          <div class="hint">
+            边距给足（50% 以上）AI 才看得清脸型，出来的嘴不会走形；
+            但重绘范围也更大。<b>放大倍数是画质关键</b> —— 全身立绘里嘴只有几十像素，
+            不放大直接重绘一定糊。
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>3 · 合成差分</legend>
+          <div class="row"><span id="targetSlot">目标部位：嘴</span></div>
+          <div class="row"><span id="targetIndex">序号：0</span> <button id="nextIndex">换下一个序号</button></div>
+          <div class="row">
+            <label class="file"><input type="file" id="aiResult" accept="image/png,image/webp,image/jpeg" />选择 AI 结果…</label>
+          </div>
+          <div class="row">
+            <span class="hint">AI 返回的是</span>
+            <select id="aiMode" style="width:auto">
+              <option value="auto">自动判断（整图只取框内）</option>
+              <option value="full-clip">整张立绘 → 只取框选区域</option>
+              <option value="full">整张立绘 → 整张使用</option>
+              <option value="crop">只有那一块 → 缩回框内</option>
+            </select>
+          </div>
+          <div class="hint">
+            推荐把<b>整张立绘</b>发给 AI（它看得到完整的脸和画风，不容易画歪），
+            拿回来只取框选区域合成 —— 框外的任何变化都丢掉，
+            否则三张差分的「其余部分」各不相同，说话时整个人会微闪。
+          </div>
+          <div class="hint" id="aiTip"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>用法（推荐流程）</legend>
+          <ol>
+            <li>载入底图。</li>
+            <li>把<b>整张立绘</b>发给 AI（豆包这类指令编辑模型），让它只改嘴/眼。</li>
+            <li>拿到 AI 返回的整图，回来<b>框出该部位</b>（框只决定「取哪一块」，顺序无所谓）。</li>
+            <li>选 AI 结果 → 自动<b>只取框内</b>合成，下载 <code>mouth_1.png</code> 等。</li>
+            <li>放进 <code>public/portrait/</code>，刷新应用。</li>
+          </ol>
+          <div class="hint">
+            为什么发整张：AI 看得到完整的脸和画风，不容易画歪；<br />
+            为什么只取框内：AI 其实会重画整张图，框外的衣服/头发/光影都有微变，
+            整张当差分图的话，三张之间「其余部分」各不相同，说话时整个人会跟着微闪。
+          </div>
+          <div class="hint">
+            序号命名：嘴 = <code>mouth_1/2.png</code>（半开/大开，闭嘴上不用做）；
+            眼 = <code>eyes_closed.png</code>（序号 1）。
+            <br /><span class="warn">底图必须是透明背景的 PNG</span>，否则轮廓命中会退化成矩形。
+            <br />用 ComfyUI 局部重绘（只返回那一块）时，先点「导出裁剪图」拿输入，其余步骤一样。
+            <br /><b>更省事的办法</b>：AI 返回整张立绘时，用
+            <code>python/tools/make_differential.py</code> —— 不框选，
+            直接比出真正改动的像素做差分，框外漂移自动丢弃（见 <code>docs/portrait-assets.md</code>）。
+          </div>
+        </fieldset>
+      </div>
+    </div>
+
+    <script>
+      const cv = document.getElementById('cv')
+      const ctx = cv.getContext('2d')
+      const boxesEl = document.getElementById('boxes')
+      const imgInfoEl = document.getElementById('imgInfo')
+
+      let img = null            // 底图
+      let imgName = 'body'
+      let scale = 1             // 显示缩放
+      let slot = 'mouth'
+      const boxes = {}          // slot -> {x,y,w,h}（比例 0~1）
+      let targetIndex = 0
+
+      // ── 底图载入
+      async function loadFromUrl(url) {
+        const im = new Image()
+        im.crossOrigin = 'anonymous'
+        im.src = url
+        await im.decode()
+        setImage(im, url.split('/').pop().replace(/\.\w+$/, ''))
+      }
+
+      async function loadFromFile(file) {
+        const url = URL.createObjectURL(file)
+        const im = new Image()
+        im.src = url
+        await im.decode()
+        setImage(im, file.name.replace(/\.\w+$/, ''))
+        URL.revokeObjectURL(url)
+      }
+
+      function setImage(im, name) {
+        img = im
+        imgName = name
+        const maxW = 560, maxH = 740
+        scale = Math.min(maxW / im.naturalWidth, maxH / im.naturalHeight, 1)
+        cv.width = Math.round(im.naturalWidth * scale)
+        cv.height = Math.round(im.naturalHeight * scale)
+        redraw()
+        buildBaseSample()
+        imgInfoEl.textContent = `${name} · ${im.naturalWidth}×${im.naturalHeight} · 显示缩放 ${(scale * 100).toFixed(0)}%`
+        // 自动把已有框按新底图重新画（比例不变）
+        document.getElementById('boxes').textContent = JSON.stringify(boxes, null, 2)
+      }
+
+      function redraw(dragRect) {
+        ctx.clearRect(0, 0, cv.width, cv.height)
+        if (img) ctx.drawImage(img, 0, 0, cv.width, cv.height)
+        for (const [key, b] of Object.entries(boxes)) {
+          const color = key === 'mouth' ? '#e08080' : key === 'eyes' ? '#80b0e0' : '#a0d080'
+          ctx.strokeStyle = color
+          ctx.lineWidth = 2
+          ctx.setLineDash([])
+          ctx.strokeRect(b.x * cv.width, b.y * cv.height, b.w * cv.width, b.h * cv.height)
+          ctx.fillStyle = color
+          ctx.font = '12px Consolas, monospace'
+          ctx.fillText(key, b.x * cv.width + 4, b.y * cv.height - 4)
+        }
+        if (dragRect) {
+          ctx.strokeStyle = '#ffd070'
+          ctx.lineWidth = 2
+          ctx.setLineDash([5, 4])
+          ctx.strokeRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+          ctx.setLineDash([])
+        }
+      }
+
+      // ── 拖拽框选
+      let dragStart = null
+      let dragging = false
+      const pos = (e) => {
+        const r = cv.getBoundingClientRect()
+        return { x: e.clientX - r.left, y: e.clientY - r.top }
+      }
+      cv.addEventListener('pointerdown', (e) => {
+        dragging = true
+        dragStart = pos(e)
+        cv.setPointerCapture(e.pointerId)
+      })
+      cv.addEventListener('pointermove', (e) => {
+        if (!dragging) return
+        const p = pos(e)
+        redraw({
+          x: Math.min(dragStart.x, p.x),
+          y: Math.min(dragStart.y, p.y),
+          w: Math.abs(p.x - dragStart.x),
+          h: Math.abs(p.y - dragStart.y),
+        })
+      })
+      cv.addEventListener('pointerup', (e) => {
+        if (!dragging) return
+        dragging = false
+        const p = pos(e)
+        const x = Math.min(dragStart.x, p.x)
+        const y = Math.min(dragStart.y, p.y)
+        const w = Math.abs(p.x - dragStart.x)
+        const h = Math.abs(p.y - dragStart.y)
+        if (w < 4 || h < 4) { redraw(); return }
+        boxes[slot] = {
+          x: +(x / cv.width).toFixed(4),
+          y: +(y / cv.height).toFixed(4),
+          w: +(w / cv.width).toFixed(4),
+          h: +(h / cv.height).toFixed(4),
+        }
+        boxesEl.textContent = JSON.stringify(boxes, null, 2)
+        redraw()
+        updateButtons()
+      })
+
+      // ── 部位切换
+      document.querySelectorAll('.slot').forEach((b) => {
+        b.addEventListener('click', () => {
+          slot = b.dataset.slot
+          document.querySelectorAll('.slot').forEach((x) => x.classList.toggle('on', x === b))
+          document.getElementById('targetSlot').textContent = `目标部位：${slot === 'mouth' ? '嘴' : '眼'}`
+        })
+      })
+
+      document.getElementById('nextIndex').addEventListener('click', () => {
+        targetIndex = (targetIndex + 1) % 3
+        document.getElementById('targetIndex').textContent = `序号：${targetIndex}`
+      })
+
+      function updateButtons() {
+        document.getElementById('exportCrop').disabled = !(img && boxes[slot])
+      }
+
+      /**
+       * 框 + 边距 = 实际要拿去给 AI 的那块（像素坐标）。
+       *
+       * ★ 抽成函数是有原因的：以前这个矩形只在「导出裁剪图」时算一次存在 cropMeta 里，
+       *   结果① 不点那个按钮就直接选 AI 结果会**静默什么都不做**；
+       *      ② 导出之后再改框，用的还是旧矩形 —— 合成出来必然错位。
+       *   现在每次现算，顺序和改动都不影响结果。
+       */
+      function paddedRect(b) {
+        const sx = Math.round(b.x * img.naturalWidth)
+        const sy = Math.round(b.y * img.naturalHeight)
+        const sw = Math.round(b.w * img.naturalWidth)
+        const sh = Math.round(b.h * img.naturalHeight)
+        const padPct = Math.max(0, Number(document.getElementById('padPct').value) || 0) / 100
+        const padX = Math.round(Math.max(sw * padPct, 12))
+        const padY = Math.round(Math.max(sh * padPct, 12))
+        const cx = Math.max(0, sx - padX)
+        const cy = Math.max(0, sy - padY)
+        const cw = Math.min(img.naturalWidth - cx, sw + padX * 2)
+        const ch = Math.min(img.naturalHeight - cy, sh + padY * 2)
+        return { cx, cy, cw, ch }
+      }
+
+      // ── 导出裁剪图（放大 ×N，给 AI 用）
+      document.getElementById('exportCrop').addEventListener('click', () => {
+        const b = boxes[slot]
+        if (!img || !b) return
+        const { cx, cy, cw, ch } = paddedRect(b)
+        const up = Math.max(1, Math.min(8, Number(document.getElementById('upScale').value) || 4))
+
+        const out = document.createElement('canvas')
+        out.width = cw * up
+        out.height = ch * up
+        const octx = out.getContext('2d')
+        octx.imageSmoothingEnabled = true
+        octx.imageSmoothingQuality = 'high'
+        octx.drawImage(img, cx, cy, cw, ch, 0, 0, out.width, out.height)
+        download(out, `${imgName}_${slot}_crop.png`)
+        document.getElementById('boxes').textContent =
+          JSON.stringify({ ...boxes, _裁剪信息: { 位置: [cx, cy], 尺寸: [cw, ch], 放大: up } }, null, 2)
+      })
+
+      /** 底图的缩小采样（用来判断 AI 是不是动了框外的东西） */
+      let baseSample = null
+
+      function buildBaseSample() {
+        if (!img) return
+        const w = 240
+        const h = Math.max(1, Math.round((img.naturalHeight / img.naturalWidth) * w))
+        const c = document.createElement('canvas')
+        c.width = w
+        c.height = h
+        const x = c.getContext('2d')
+        x.drawImage(img, 0, 0, w, h)
+        baseSample = { data: x.getImageData(0, 0, w, h).data, w, h }
+      }
+
+      /**
+       * 比较「框外」AI 结果和底图的差异。
+       *
+       * 为什么需要：AI 说只改嘴，实际上常常把整张重画一遍 —— 换了光影、甚至改了构图。
+       * 这时把框内那片贴回底图，嘴的位置/明暗就对不上（用户看到的正是「完全和嘴对不上」）。
+       * 框外差异小 = 改动确实集中在框内，可以放心合成；
+       * 框外差异大 = 它在别处也动了，贴回去必然错位，应该重做。
+       */
+      function outsideDiff(ai, rect) {
+        if (!baseSample) return null
+        const { cx, cy, cw, ch } = rect
+        const { w, h, data: a } = baseSample
+        const c = document.createElement('canvas')
+        c.width = w
+        c.height = h
+        const x = c.getContext('2d')
+        x.drawImage(ai, 0, 0, w, h)
+        const b = x.getImageData(0, 0, w, h).data
+
+        // 框在采样坐标系里的范围（放 8% 余量，避开羽化带）
+        const mx = cw * 0.08
+        const bx0 = ((cx - mx) / img.naturalWidth) * w
+        const bx1 = ((cx + cw + mx) / img.naturalWidth) * w
+        const by0 = ((cy - mx) / img.naturalHeight) * h
+        const by1 = ((cy + ch + mx) / img.naturalHeight) * h
+
+        let n = 0
+        let sum = 0
+        let big = 0
+        for (let y = 0; y < h; y++) {
+          for (let px = 0; px < w; px++) {
+            if (px >= bx0 && px <= bx1 && y >= by0 && y <= by1) continue
+            const i = (y * w + px) * 4
+            /*
+             * 只比底图**实心**的地方。
+             * 底图背景是透明的（RGB 全 0），而 AI 返回的图背景是不透明的浅色 ——
+             * 把背景算进来必然「处处都差」，那种数据没有意义。
+             */
+            if (a[i + 3] < 128) continue
+            const d =
+              Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])
+            n++
+            sum += d
+            if (d > 60) big++
+          }
+        }
+        if (!n) return null
+        return { mean: sum / n, bigRatio: big / n, samples: n }
+      }
+
+      // ── 合成差分：把 AI 结果缩放回裁剪尺寸，贴到整画布上并羽化边缘
+      document.getElementById('aiResult').addEventListener('change', async (e) => {
+        const file = e.target.files?.[0]
+        if (!file || !img) return
+        // 目标部位和矩形**现取**，所以「先框选后选文件」和「先选文件后框选」都对
+        const s = slot
+        const box = boxes[s]
+        if (!box) {
+          document.getElementById('aiTip').textContent =
+            `先在图上拖出一个「${s === 'mouth' ? '嘴' : '眼'}」的框，再选 AI 结果`
+          return
+        }
+        const { cx, cy, cw, ch } = paddedRect(box)
+
+        const url = URL.createObjectURL(file)
+        const ai = new Image()
+        ai.src = url
+        await ai.decode()
+        const out = document.createElement('canvas')
+        out.width = img.naturalWidth
+        out.height = img.naturalHeight
+        const octx = out.getContext('2d')
+        octx.imageSmoothingEnabled = true
+        octx.imageSmoothingQuality = 'high'
+
+        /*
+         * AI 可能返回两种东西：
+         *   ① 整张图（豆包/指令编辑类常见）—— 直接整张用
+         *   ② 只有那一块（ComfyUI 局部重绘常见）—— 缩回裁剪尺寸贴回原位
+         * 默认按长宽比自动判断；判不准时可以在界面上手动指定。
+         */
+        const mode = document.getElementById('aiMode').value
+        const baseAspect = img.naturalWidth / img.naturalHeight
+        const cropAspect = cw / ch
+        const aiAspect = ai.naturalWidth / ai.naturalHeight
+        const near = (a, b) => Math.abs(a - b) / b < 0.03
+
+        // 归一化成三种处理方式：整图只取框内 / 整图整张用 / 局部块缩回框内
+        let how
+        if (mode === 'full-clip') how = 'full-clip'
+        else if (mode === 'full') how = 'full'
+        else if (mode === 'crop') how = 'crop'
+        else how = near(aiAspect, baseAspect) ? 'full-clip' : 'crop'
+
+        const tips = []
+
+        if (how === 'full' || how === 'full-clip') {
+          // 整图：先按底图尺寸画进来（分辨率/长宽比不一致也强行归一）
+          octx.drawImage(ai, 0, 0, out.width, out.height)
+
+          // 框外差异检查：差异大说明 AI 不止改了框内，贴回去会错位
+          const od = outsideDiff(ai, { cx, cy, cw, ch })
+          if (od) {
+            if (od.mean > 12 || od.bigRatio > 0.15) {
+              tips.push(
+                `⚠ 框外差异偏大（平均 ${od.mean.toFixed(1)}，${(od.bigRatio * 100).toFixed(1)}% 像素明显不同）` +
+                  ' —— AI 在框外也改了东西（换了光影或构图），贴回底图很可能对不上。建议重做这一张',
+              )
+            } else {
+              tips.push(`框外差异很小（平均 ${od.mean.toFixed(1)}）—— 改动确实集中在框内，可以放心用`)
+            }
+          }
+
+          if (!near(aiAspect, baseAspect)) {
+            tips.push(
+              `⚠ 长宽比和底图不一致（${aiAspect.toFixed(2)} vs ${baseAspect.toFixed(2)}），已强行缩到底图尺寸，可能变形`,
+            )
+          }
+
+          if (how === 'full-clip') {
+            /*
+             * ★ 关键一步：整图只是「来源」，真正叠上去的只有框选区域。
+             *   框外一律丢弃 —— AI 重画整张图时，衣服/头发/光影都会有微变，
+             *   如果整张当差分图，三张之间「其余部分」各不相同，
+             *   说话时嘴型一切换整个人都会跟着微闪。
+             */
+            const keep = document.createElement('canvas')
+            keep.width = out.width
+            keep.height = out.height
+            const kctx = keep.getContext('2d')
+            kctx.imageSmoothingEnabled = true
+            kctx.drawImage(octx.canvas, 0, 0)
+
+            octx.clearRect(0, 0, out.width, out.height)
+            octx.drawImage(keep, cx, cy, cw, ch, cx, cy, cw, ch)
+            feather(octx, cx, cy, cw, ch)
+            tips.push('识别为「整图」→ 已只取框选区域合成（框外的变化全部丢弃）')
+          } else {
+            tips.push('整张使用（框外的变化也会保留 —— 只在特殊情况下才这么做）')
+          }
+        } else {
+          /*
+           * 局部块：缩到裁剪框的尺寸再贴回去。
+           * ★ 分辨率升高无所谓（等比缩放即可），**长宽比变了才是麻烦** ——
+           *   直接铺满会拉伸。这时先按目标长宽比从 AI 结果居中裁一块，
+           *   再缩放，尽量保住内容不被压扁。
+           */
+          let src = ai
+          if (!near(aiAspect, cropAspect)) {
+            const targetAspect = cropAspect
+            let sw2 = ai.naturalWidth
+            let sh2 = Math.round(sw2 / targetAspect)
+            if (sh2 > ai.naturalHeight) {
+              sh2 = ai.naturalHeight
+              sw2 = Math.round(sh2 * targetAspect)
+            }
+            const sx2 = Math.round((ai.naturalWidth - sw2) / 2)
+            const sy2 = Math.round((ai.naturalHeight - sh2) / 2)
+
+            // 先画进一张中间画布，再作为整体贴回去
+            const mid = document.createElement('canvas')
+            mid.width = ai.naturalWidth
+            mid.height = ai.naturalHeight
+            mid.getContext('2d').drawImage(ai, 0, 0)
+            src = mid
+            octx.drawImage(mid, sx2, sy2, sw2, sh2, cx, cy, cw, ch)
+            tips.push(
+              `⚠ AI 返回的长宽比和裁剪图不一致（${aiAspect.toFixed(2)} vs ${cropAspect.toFixed(2)}）` +
+                '，已按居中裁剪对齐',
+            )
+            if (Math.abs(aiAspect - cropAspect) / cropAspect > 0.25) {
+              tips.push('差异很大，很可能 AI 重画了整个画面 —— 建议让它保持原始长宽比重做')
+            }
+          } else {
+            octx.drawImage(ai, 0, 0, ai.naturalWidth, ai.naturalHeight, cx, cy, cw, ch)
+          }
+          feather(octx, cx, cy, cw, ch)
+          tips.push('识别为「局部块」→ 已缩回裁剪尺寸贴回原位并羽化')
+        }
+
+        const name =
+          s === 'mouth' ? `mouth_${targetIndex}.png` : targetIndex === 1 ? 'eyes_closed.png' : 'eyes_open.png'
+        // 调试用：留着最后一张合成结果，控制台里可以直接看（省得为了检查还要找下载目录）
+        window.__lastDiff = { canvas: out, name, tips: [...tips] }
+        download(out, name)
+        URL.revokeObjectURL(url)
+        tips.push(`已下载 ${name}`)
+        document.getElementById('aiTip').textContent = tips.join('；')
+      })
+
+      function feather(octx, x, y, w, h) {
+        // 用径向渐变做不了矩形羽化，直接按行/列乘 alpha 更省事：这里改用绘制遮罩的方式
+        const pad = Math.max(2, Math.round(Math.min(w, h) * 0.03))
+        const imgData = octx.getImageData(x, y, w, h)
+        const d = imgData.data
+        for (let j = 0; j < h; j++) {
+          for (let i = 0; i < w; i++) {
+            const dx = Math.min(i, w - 1 - i)
+            const dy = Math.min(j, h - 1 - j)
+            const dist = Math.min(dx, dy)
+            if (dist >= pad) continue
+            const k = pad === 0 ? 1 : dist / pad
+            d[(j * w + i) * 4 + 3] = Math.round(d[(j * w + i) * 4 + 3] * k)
+          }
+        }
+        octx.putImageData(imgData, x, y)
+      }
+
+      function download(canvas, filename) {
+        canvas.toBlob((blob) => {
+          const a = document.createElement('a')
+          a.href = URL.createObjectURL(blob)
+          a.download = filename
+          a.click()
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000)
+        }, 'image/png')
+      }
+
+      // ── 底图入口
+      document.getElementById('pick').addEventListener('change', (e) => {
+        const f = e.target.files?.[0]
+        if (f) loadFromFile(f)
+      })
+      document.getElementById('loadDefault').addEventListener('click', () => {
+        loadFromUrl('../portrait/body.png').catch(() => {
+          imgInfoEl.textContent = '没找到 ../portrait/body.png —— 请手动选择 PNG'
+        })
+      })
+
+      // 自动尝试载入默认底图
+      loadFromUrl('../portrait/body.png').catch(() => {
+        imgInfoEl.textContent = '请选择一张 PNG 底图（或用左边的按钮载入 public/portrait/body.png）'
+      })
+    </script>
+  </body>
+</html>

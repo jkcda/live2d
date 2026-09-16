@@ -1,0 +1,34 @@
+{
+  "name": "占位角色",
+  "note": "这是自动生成的占位立绘，用来跑通管道。分好图层后整体替换成你自己的角色。",
+  "canvas": {
+    "width": 800,
+    "height": 1100
+  },
+  "content": {
+    "x": 0.13,
+    "y": 0.06,
+    "width": 0.74,
+    "height": 0.92
+  },
+  "jawLine": 0.5,
+  "regions": {
+    "Head": {
+      "x": 0.26,
+      "y": 0.06,
+      "width": 0.48,
+      "height": 0.36
+    },
+    "Body": {
+      "x": 0.14,
+      "y": 0.42,
+      "width": 0.72,
+      "height": 0.56
+    }
+  },
+  "motion": {
+    "bobPercent": 0.012,
+    "swayDegrees": 2.2,
+    "breatheScale": 0.006
+  }
+}

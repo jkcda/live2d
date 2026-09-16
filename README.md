@@ -91,10 +91,17 @@ live2d/
 ├── src/
 │   ├── App.vue                  # 根组件：舞台 + 控制条 + 面板挂载
 │   ├── components/
-│   │   ├── Live2DStage.vue      # Live2D 舞台 + 每帧参数合成
+│   │   ├── CharacterStage.vue   # 角色舞台（选渲染器 + 每帧参数合成 + 悬浮/点击）
 │   │   ├── ChatPanel.vue        # 对话界面（流式显示 + 打断）
-│   │   └── SettingsPanel.vue    # LLM / 语音服务配置 + 连接测试
+│   │   └── SettingsPanel.vue    # LLM / 语音服务 / 角色渲染方式
 │   ├── core/
+│   │   ├── character/
+│   │   │   ├── types.ts         # CharacterStage / CharacterFrame：两个渲染器的共同接口
+│   │   │   ├── live2d.ts        # Live2D 渲染器 → 接口适配（口型落点、点击反应）
+│   │   │   └── mode.ts          # 渲染方式的选择与持久化
+│   │   ├── portrait/            # 立绘（PNGTuber）渲染器
+│   │   │   ├── assets.ts        # 素材加载与校验（缺哪张就降级）
+│   │   │   └── stage.ts         # 图层合成 + 参数语义解释 + 轮廓命中
 │   │   ├── runtime.ts           # 全局单例（播放器 / 语音输出 / 会话）
 │   │   ├── settings.ts          # 配置读写（localStorage）
 │   │   ├── audio/
@@ -134,7 +141,9 @@ live2d/
 │   │   └── asr/
 │   │       ├── base.py
 │   │       └── sensevoice.py    # FunASR SenseVoice-Small（可选）
+│   ├── tools/                   # 立绘素材工具（抠背景 / 做差分）
 │   └── voices/                  # 克隆音色的参考音频（不入库）
+├── tools/                       # 仓库工具脚本（立绘自动验证等）
 └── docs/
 ```
 
@@ -212,7 +221,7 @@ public/models/
 
 Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/sample/>
 
-下载后解压到 `public/models/<名字>/` 即可，**通常不用改代码** —— `src/core/live2d/models.ts` 会自动按常见命名探测（Haru / Hiyori / Kei / Mao / Natori / Rice / Wanko / Shizuku / Mark / MIO）。命名不常见时，在 `Live2DStage.vue` 顶部把 `EXPLICIT_MODEL` 填成相对路径，例如 `'Haru/Haru.model3.json'`。
+下载后解压到 `public/models/<名字>/` 即可，**通常不用改代码** —— `src/core/live2d/models.ts` 会自动按常见命名探测（Haru / Hiyori / Kei / Mao / Natori / Rice / Wanko / Shizuku / Mark / MIO）。命名不常见时，在 `CharacterStage.vue` 顶部把 `EXPLICIT_MODEL` 填成相对路径，例如 `'Haru/Haru.model3.json'`；开发期也可以用 `?model=<目录>/<文件>.model3.json` 临时换，不用改代码。
 
 | 模型 | 说明 |
 |---|---|
@@ -224,6 +233,39 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 **必须确认模型带 `ParamMouthOpenY` 参数** —— 这是口型驱动的落点，没有它整条口型链路无处可去。
 
 **许可**：这些模型可免费下载用于学习与开发，但各有条款（商用限制等），下载前请阅读官网说明。因此 `public/models/` 不入库。
+
+---
+
+## 换成自己的角色
+
+两条路，成本差很多：
+
+| | 立绘差分（PNGTuber） | Live2D 模型 |
+|---|---|---|
+| 素材 | 几张差分图（嘴 ×3、眼 ×2，可选头发层） | 需要建模（自己做或委托） |
+| 成本 | 极低 —— 从现有 PSD 导出即可 | 学习曲线陡，或委托建模师 |
+| 能做到 | 张嘴说话、随机眨眼、呼吸微摆、摸头/戳身体反应 | 上面全部 + 立体转头、发丝物理、复杂动作 |
+| 素材放哪 | `public/portrait/` | `public/models/<名字>/` |
+| 怎么切 | 设置 → 角色 → 渲染方式（或 `?portrait=1`） | 同左（或 `?live2d=1`） |
+
+**立绘的完整素材规格见 [`docs/portrait-assets.md`](docs/portrait-assets.md)** —— 要准备哪几张图、
+`portrait.json` 怎么写、差分图怎么做、素材没生效时怎么排查，都在里面。
+
+两个配套脚本（都不需要人眼盯屏幕）：
+
+| 脚本 | 作用 |
+|---|---|
+| `python/tools/prepare_portrait.py 立绘.png` | 一条命令备好底图：备份原图 → 抠背景 → 报出取景参数 |
+| `python/tools/make_differential.py --base … --variant …` | 拿「AI 改过的整张图」自动做差分图：只取真正改动的像素，框外漂移自动丢弃 |
+| `node tools/verify-portrait.mjs` | 自动验证：报素材加载状态，并逐状态截图供比对（嘴型是否真的换了、对位对不对） |
+
+两条路共用同一套交互层（悬浮浮现、点击反应、口型、待机），区别只是渲染器：
+`core/portrait/stage.ts` 与 `core/live2d/engine.ts` 实现同一个 `CharacterStage` 接口
+（见 `core/character/types.ts`）。所以将来从立绘升级到 Live2D，界面和手感不用重做。
+
+> 立绘渲染层把待机/口型的**参数帧**当成语义来解释：呼吸 → 上下浮动，头部偏转 → 位移+旋转，
+> 口型 → 换嘴差分（没有差分就拉伸下巴分界线以下）。参数来源（IdleAnimator + LipSyncDriver）
+> 两边完全相同，所以节奏一致。
 
 ---
 
