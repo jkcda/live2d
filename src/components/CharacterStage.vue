@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { createLive2DCharacter, type Live2DCharacter } from '@/core/character/live2d'
 import { createPortraitStage, type PortraitCharacter } from '@/core/portrait/stage'
 import { expressionLabel } from '@/core/portrait/expressions'
+import { poseLabel } from '@/core/portrait/poses'
 import type { CharacterFrame, CharacterStage } from '@/core/character/types'
 import { resolveModelUrl } from '@/core/live2d/models'
 import { classify } from '@/core/live2d/reactions'
@@ -86,6 +87,25 @@ function toggleExpression(id: string): void {
   const next = activeExpression.value === id ? null : id
   activeExpression.value = next
   portrait.setExpression(next)
+}
+
+/**
+ * 姿势（招手之类）：一张整身替换图，和底图交叉淡入淡出。
+ *
+ * 和表情一样做成按钮，理由更硬：**姿势只在"她做动作"的那几秒看得到**，
+ * 而什么时候做动作是个语义问题（打招呼？被点？）——
+ * 没定下来之前，至少得能手动看一眼素材对不对。
+ */
+const poseIds = ref<string[]>([])
+const activePose = ref<string | null>(null)
+const poseChips = computed(() => poseIds.value.map((id) => ({ id, label: poseLabel(id) })))
+
+/** 点一下摆这个姿势（一直保持），再点一下回到原来的姿势 */
+function togglePose(id: string): void {
+  if (!portrait) return
+  const next = activePose.value === id ? null : id
+  activePose.value = next
+  portrait.setPose(next)
 }
 
 let stage: CharacterStage | null = null
@@ -323,6 +343,7 @@ async function mount(s: PackState): Promise<void> {
     stage = created
     portrait = created
     expressionIds.value = created.expressionNames
+    poseIds.value = created.poseNames
     kindLabel.value = '立绘'
   } else {
     status.value = `模型加载中…（${pack.name}）`
@@ -330,13 +351,15 @@ async function mount(s: PackState): Promise<void> {
     const live2d = await createLive2DCharacter(el, { url })
     stage = live2d
     kindLabel.value = 'Live2D'
-    // 换到 Live2D：把立绘那套表情入口收掉（它的表情走模型自己的资源）
+    // 换到 Live2D：把立绘那套入口收掉（它的表情/姿态走模型自己的资源）
     portrait = null
     expressionIds.value = []
+    poseIds.value = []
     logAbilities(live2d)
   }
-  // 换了角色就回到素颜：上一次选的表情属于上一个角色，素材可能根本没这张
+  // 换了角色就回到原始状态：上一次选的属于上一个角色，素材可能根本没这张
   activeExpression.value = null
+  activePose.value = null
 
   // 口型手感可以按角色调（比如某个角色的立绘振幅偏小）
   lipsync = new LipSyncDriver(pack.tuning?.lipsync)
@@ -353,6 +376,13 @@ async function mount(s: PackState): Promise<void> {
     `[stage] 角色就位：${pack.name}（${pack.kind}）｜能力 ${JSON.stringify(s.features)}` +
       `${s.probe ? `｜素材 ${JSON.stringify(s.probe)}` : ''}`,
   )
+
+  /*
+   * 她登场时打个招呼：有「招手」素材就招一次（限时 3.2s，自己收回），没有就什么都不做。
+   * 放在 mount 里而不是 onMounted：切换角色也算"她重新登场"，手感一致；
+   * 而且用户换完角色立刻能看到她动一下，而不是对着一张静止的图怀疑切换失败了。
+   */
+  portrait?.greet()
 
   if (import.meta.env.DEV) {
     // 开发期调试钩子：自动化脚本靠它读到舞台 / 口型 / 音频的真实状态
@@ -521,6 +551,16 @@ onUnmounted(() => {
         <button class="btn" @click="testLipSync">测试口型</button>
         <button class="btn" @click="testInterrupt">打断</button>
         <!-- 表情：一个角色有哪些差分就显示哪几个（没有就整排不出现） -->
+        <button
+          v-for="chip in poseChips"
+          :key="`pose-${chip.id}`"
+          class="btn"
+          :class="{ on: activePose === chip.id }"
+          :title="`姿势：${chip.label}（再点一下回到原姿势）`"
+          @click="togglePose(chip.id)"
+        >
+          {{ chip.label }}
+        </button>
         <button
           v-for="chip in expressionChips"
           :key="chip.id"

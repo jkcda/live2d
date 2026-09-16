@@ -12,6 +12,8 @@
  *   eyes_closed.png    眼：闭       ┘
  *   expr_<id>.png      表情差分     ┐ 可选，一张一个情绪（id 见 expressions.ts）
  *                                   ┘ 整张画布的差分：脸的部分常驻，嘴在那块让位给口型
+ *   pose_<id>.png      姿态差分     ┐ 可选（id 见 poses.ts）。**整身替换图**，
+ *                                   ┘ 不是"叠上去的差分"：见 poses.ts 的说明
  *   hair_front.png     前发         ┐ 可选，晃动时单独动，更生动
  *   hair_back.png      后发         ┘
  *
@@ -23,6 +25,7 @@
 
 import { Assets, Rectangle, Texture } from 'pixi.js'
 import { EXPRESSION_SPECS, expressionFileNames } from './expressions'
+import { POSE_SPECS, poseFileNames } from './poses'
 
 export interface PortraitRegion {
   x: number
@@ -88,6 +91,19 @@ export interface PortraitExpression {
   texture: Texture
 }
 
+/**
+ * 一张姿态差分（`pose_<id>.png`）。
+ *
+ * ★ 和表情不同：这是**整身替换图**，不是"只有改动区域有内容的差分"。
+ *   因为"原来的姿势要消失"这件事，靠往上叠图层做不到（只能加像素，不能擦像素），
+ *   所以姿态是整张换、和底图交叉淡入淡出。素材怎么做见 docs/portrait-assets.md。
+ */
+export interface PortraitPose {
+  id: string
+  label: string
+  texture: Texture
+}
+
 export interface PortraitAssets {
   manifest: PortraitManifest
   baseUrl: string
@@ -123,6 +139,8 @@ export interface PortraitAssets {
   mouthPatches: (PortraitPatch | undefined)[]
   /** 表情差分（按 `expressions.ts` 的候选顺序）。长度可能是 0 */
   expressions: PortraitExpression[]
+  /** 姿态差分（按 `poses.ts` 的候选顺序）。长度可能是 0 */
+  poses: PortraitPose[]
 }
 
 async function loadOptionalTexture(url: string): Promise<Texture | undefined> {
@@ -498,6 +516,27 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
     )
   }
 
+  /*
+   * 姿态差分：整身替换图，和表情一样按候选名探（含中文别名）。
+   * 同样地，探测（设置面板）和加载共用 poses.ts 那一份清单。
+   */
+  const poses: PortraitPose[] = []
+  for (const spec of POSE_SPECS) {
+    for (const name of poseFileNames(spec)) {
+      const texture = await loadOptionalTexture(`${base}/pose_${name}.png`)
+      if (texture) {
+        poses.push({ id: spec.id, label: spec.label, texture })
+        break
+      }
+    }
+  }
+
+  if (import.meta.env.DEV && poses.length) {
+    console.info(
+      `[portrait] 姿态差分 ${poses.length} 张：` + poses.map((p) => `${p.id}(${p.label})`).join('、'),
+    )
+  }
+
   return {
     manifest,
     baseUrl: base,
@@ -513,6 +552,7 @@ export async function loadPortrait(baseUrl = 'portrait'): Promise<PortraitAssets
     mouths,
     mouthPatches,
     expressions,
+    poses,
   }
 }
 

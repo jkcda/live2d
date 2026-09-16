@@ -24,6 +24,7 @@ import {
   splitAtJaw,
   type PortraitExpression,
   type PortraitManifest,
+  type PortraitPose,
 } from './assets'
 import { expressionSpec } from './expressions'
 
@@ -85,6 +86,25 @@ const DEFAULT_MIN_OPEN_SCALE = 0.35
  * 到了就自动回到素颜 —— 表情是「反应」，不该永久挂在脸上。
  */
 const EXPRESSION_HOLD_MS = 4000
+
+/**
+ * 一次姿态（招手之类）默认挂多久。
+ *
+ * 比表情长：姿态是"她做了个动作"，一闪而过看不出是什么；
+ * 但也不能太长 —— 一直举着手会很怪，而且没有第二张差分时
+ * 只能"保持举手"，时间越长越像卡住了。
+ */
+const POSE_HOLD_MS = 3200
+
+/**
+ * 换姿势的交叉淡入淡出时长（毫秒）。
+ *
+ * 为什么必须淡：
+ *   姿态是**整身替换图**（见 poses.ts），硬切会像掉帧；
+ *   而素材已经保证"头部区域和底图逐像素一致"（见 docs），
+ *   所以淡入淡出期间**脸和头发一个像素都不会动**，动的只有身体/手臂 —— 这正是想要的效果。
+ */
+const POSE_FADE_MS = 170
 
 /**
  * 表情的嘴那一块往外扩多少像素（再遮住）。
@@ -178,6 +198,21 @@ export interface PortraitCharacter extends CharacterStage {
   setExpression(id: string | null): void
   /** 素材里实际存在的表情 id（= `abilities.expressionNames`） */
   readonly expressionNames: string[]
+  /**
+   * 换姿势（招手之类）。`null` = 回到底图那套。
+   * 换的时候和底图交叉淡入淡出，脸和头发一个像素都不动（见 poseLayer 的说明）。
+   */
+  setPose(id: string | null, holdMs?: number): void
+  /** 素材里实际存在的姿势 id */
+  readonly poseNames: string[]
+  /**
+   * 打个招呼：有「招手」素材就招一次（限时，自己收回），没有就什么都不做。
+   *
+   * 为什么单独给一个语义方法而不是让调用方 `setPose('wave', 3200)`：
+   * 「打招呼」以后会从好几处触发（她登场、你切回窗口、她开口），
+   * 每处都写一遍姿势 id 和时长，早晚会有一处写成别的姿势或者忘加时长。
+   */
+  greet(): void
 }
 
 export async function createPortraitStage(
@@ -209,24 +244,59 @@ export async function createPortraitStage(
   /*
    * 底图：有嘴差分就整张放；没有就沿下巴分界线切成两半，靠拉伸下半张做张嘴。
    * 拉伸而不是平移，是为了不露出断口。
+   *
+   * `bodySprites` 单独留着：换姿势时要把底图整体淡出（见 poseLayer）。
    */
   const mouthStates = assets.mouths
   const hasMouthArt = mouthStates.length > 0
   const jawLineRatio = manifest.jawLine ?? 0.5
 
   let jaw: Container | null = null
+  const bodySprites: Sprite[] = []
   if (hasMouthArt) {
-    root.addChild(new Sprite(assets.body))
+    const bodySprite = new Sprite(assets.body)
+    bodySprites.push(bodySprite)
+    root.addChild(bodySprite)
   } else {
     const { upper, lower, jawY } = splitAtJaw(assets.body, canvasH * jawLineRatio)
-    root.addChild(new Sprite(upper))
+    bodySprites.push(new Sprite(upper))
+    root.addChild(bodySprites[0])
     jaw = new Container()
     jaw.position.set(0, jawY)
     const lowerSprite = new Sprite(lower)
     lowerSprite.position.set(0, 0)
     jaw.addChild(lowerSprite)
     root.addChild(jaw)
+    bodySprites.push(lowerSprite)
   }
+
+  /*
+   * 姿态图层：整身替换图（`pose_<id>.png`），和底图**交叉淡入淡出**。
+   *
+   * 为什么是"整身替换"而不是像表情那样"叠一层差分"：差分图层只能往上加像素，
+   * 加不出"擦掉"的效果 —— 招手时原来那条垂着的胳膊必须消失，否则会看到她有两只左手。
+   * 所以姿态是整张换：底图 alpha 1→0、姿态 alpha 0→1。
+   *
+   * 换的时候脸不会跟着变：素材那一端保证了**头部区域和底图逐像素一致**
+   * （做法见 docs/portrait-assets.md：抠底之后把脸恢复成底图那张，
+   *  因为 AI 重画过的脸在招手时会轻微变样）。所以淡入淡出期间动的只有身体和手臂。
+   *
+   * 位置：底图之上、表情/瞳孔之下 —— 脸的图层永远压在身体之上。
+   * （没有嘴差分、靠拉下巴张嘴的角色，摆姿势时下巴拉伸会被姿态图盖住 ——
+   *  和表情的遮嘴块同一个道理，都是"没有嘴素材"那条退化路线的代价。）
+   */
+  const poseLayer = assets.poses.length ? new Sprite(assets.poses[0].texture) : null
+  if (poseLayer) {
+    poseLayer.alpha = 0
+    poseLayer.visible = false
+    root.addChild(poseLayer)
+  }
+
+  /** 当前姿势 / 到期时间（0 = 手动选的，不过期）/ 淡入淡出进度 0~1 */
+  let pose: PortraitPose | null = null
+  let poseUntil = 0
+  let poseMix = 0
+  let lastPoseAt = 0
 
   /*
    * 表情图层：整张差分盖在脸上（眉毛/眼睛/脸颊都归它），**在瞳孔和眼差分之下**。
@@ -413,6 +483,10 @@ export async function createPortraitStage(
     expression: null as string | null,
     /** 表情自带的嘴这一帧是否让给了口型 */
     expressionMouthYielded: false,
+    /** 当前姿势 id（null = 底图那套） */
+    pose: null as string | null,
+    /** 底图 → 姿态的混合进度（0 = 全底图，1 = 全姿态） */
+    poseMix: 0,
   }
 
   const applyFrame = (frame: CharacterFrame) => {
@@ -543,6 +617,34 @@ export async function createPortraitStage(
     shown.expression = expr?.id ?? null
     /** 表情的嘴这一帧让给口型了吗（排查"两张嘴"时先看它） */
     shown.expressionMouthYielded = mouthCover ? mouthCover.visible : false
+
+    /*
+     * 姿态：底图和姿态图交叉淡入淡出。
+     *
+     * 用**时间**推进而不是每帧乘个系数：看得到的是"淡了多久"，
+     * 乘系数会随帧率变化（144Hz 上比 60Hz 快一倍多，同一份代码两种手感）。
+     */
+    if (poseLayer) {
+      if (pose && poseUntil !== 0 && now >= poseUntil) {
+        pose = null
+        poseUntil = 0
+      }
+      const dt = lastPoseAt === 0 ? 16 : Math.min(64, now - lastPoseAt)
+      lastPoseAt = now
+      const step = dt / POSE_FADE_MS
+      const target = pose ? 1 : 0
+      poseMix =
+        target > poseMix ? Math.min(target, poseMix + step) : Math.max(target, poseMix - step)
+
+      if (pose && poseLayer.texture !== pose.texture) poseLayer.texture = pose.texture
+      poseLayer.alpha = poseMix
+      poseLayer.visible = poseMix > 0.001
+      // 底图整体淡出：姿态图里也有头和脸（且和底图逐像素一致），所以不会缺东西
+      const bodyAlpha = 1 - poseMix
+      for (const s of bodySprites) s.alpha = bodyAlpha
+      shown.pose = pose?.id ?? null
+      shown.poseMix = poseMix
+    }
   }
 
   /**
@@ -650,10 +752,45 @@ export async function createPortraitStage(
   /** 最近给过的表情：连着戳同一个地方时换一张，别一直同一张脸 */
   const recentExpressions: string[] = []
 
+  const poseNames = assets.poses.map((p) => p.id)
+  /** 纹理 → id：验证脚本要能说出"现在摆的是哪个姿势" */
+  const poseIds = new Map(assets.poses.map((p) => [p.texture, p.id]))
+
+  /**
+   * 换姿势（`null` = 回到底图那套）。
+   *
+   * @param holdMs > 0 时限时做这个动作、到点自己收回去（打招呼/点击反应走这条）；
+   *                0 = 一直保持（手动在界面上选的）
+   */
+  const setPose = (id: string | null, holdMs = 0): void => {
+    if (id === null) {
+      pose = null
+      poseUntil = 0
+      return
+    }
+    const found = assets.poses.find((p) => p.id === id)
+    if (!found) {
+      if (import.meta.env.DEV) {
+        console.warn(
+          `[portrait] 没有这个姿势：${id}｜可用：${poseNames.join('、') || '（一张都没有）'}`,
+        )
+      }
+      return
+    }
+    pose = found
+    poseUntil = holdMs > 0 ? performance.now() + holdMs : 0
+  }
+
   const abilities: CharacterAbilities = {
     lipSyncParams: [],
     expressionNames,
     motionGroups: {},
+  }
+
+  /** 打招呼用的姿势 id：有「招手」就用它（`poses.ts` 里的 id） */
+  const GREETING_POSE = 'wave'
+  const greet = (): void => {
+    if (assets.poses.some((p) => p.id === GREETING_POSE)) setPose(GREETING_POSE, POSE_HOLD_MS)
   }
 
   const stage: PortraitCharacter = {
@@ -661,6 +798,9 @@ export async function createPortraitStage(
     abilities,
     expressionNames,
     setExpression,
+    poseNames,
+    setPose,
+    greet,
     layout,
     applyFrame,
     hitTest,
@@ -717,10 +857,15 @@ export async function createPortraitStage(
           derivedOpenEyes: assets.derivedOpenEyes,
           /** 表情差分实际加载到的张数（缺哪张就是"这个角色做不出这个表情"） */
           expressions: assets.expressions.length,
+          /** 姿态差分实际加载到的张数 */
+          poses: assets.poses.length,
         },
         /** 表情：可用的清单 + 手动切换入口（验证脚本靠它逐张看效果） */
         expressions: assets.expressions.map((e) => ({ id: e.id, label: e.label })),
         setExpression: (id: string | null, holdMs = 0) => setExpression(id, holdMs),
+        /** 姿态：可用的清单 + 手动切换入口 */
+        poses: assets.poses.map((p) => ({ id: p.id, label: p.label })),
+        setPose: (id: string | null, holdMs = 0) => setPose(id, holdMs),
         /**
          * 图层的**真实**可见状态（从 Pixi 场景里读，不是从状态变量推）。
          *
@@ -734,6 +879,13 @@ export async function createPortraitStage(
           expressionCount: assets.expressions.length,
           mouthCoverVisible: mouthCover?.visible ?? false,
           eyesVisible: eyes?.visible ?? false,
+          poseVisible: poseLayer?.visible ?? false,
+          poseId: poseLayer ? (poseIds.get(poseLayer.texture) ?? null) : null,
+          poseCount: assets.poses.length,
+          /** 底图 → 姿态的混合进度：1 = 完全换成姿态图 */
+          poseMix,
+          /** 底图的 alpha（换姿势时淡出，用来断言"没有两张脸叠着"） */
+          bodyAlpha: bodySprites[0]?.alpha ?? 1,
         }),
         /** 说话时用来遮住「表情自带的嘴」的那个矩形（画布像素），排查"两张嘴"时看它 */
         mouthCoverBox,

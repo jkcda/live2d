@@ -288,13 +288,16 @@ async function main() {
    * **嘴那一块必须完全一样**，而眉眼那块必须不一样。
    */
   const exprChecks = []
+  /*
+   * 图层的真实可见性/混合值（从 Pixi 场景读，不是状态变量）。
+   * 表情和姿势两个用例都要用，所以在这里定义一次。
+   */
+  const layers = () => evaluate(`JSON.parse(JSON.stringify(window.__nexusPortrait.layers()))`)
   if (portrait) {
     const info = await evaluate(`(() => {
       const p = window.__nexusPortrait
       return { available: p.expressions, cover: p.mouthCoverBox }
     })()`)
-    const layers = () =>
-      evaluate(`JSON.parse(JSON.stringify(window.__nexusPortrait.layers()))`)
     const setExpression = async (id) => {
       await evaluate(`window.__nexusPortrait.setExpression(${id === null ? 'null' : `'${id}'`})`)
       await sleep(260)
@@ -407,6 +410,84 @@ async function main() {
     writeFileSync(
       join(OUT_DIR, 'expressions.json'),
       JSON.stringify({ info, neutralSilent, neutralTalk, shots: exprShots }, null, 2),
+    )
+
+    /*
+     * 姿势（招手）。
+     *
+     * 和表情不一样，姿势是**整身替换图**：底图淡出、姿态图淡入。
+     * 因此要验的是三件事：
+     *   1. 姿态图真的被画上去了，而且底图**确实淡到了 0**（不然就是两张身体叠着）
+     *   2. 换的过程中**脸和头发一个像素都不能动** —— 素材那一端保证了
+     *      "头部区域与底图逐像素一致"，这里在渲染结果上再验一遍
+     *   3. 「打招呼」这条路（`greet()`）能自己收回，不是永久举着手
+     *
+     * 判据 2 靠截图逐像素比：`pose-wave.png` 与素颜那张比，变化必须**全在头部框以外**。
+     */
+    const poseInfo = await evaluate(`(() => {
+      const p = window.__nexusPortrait
+      return { available: p.poses, count: p.counts.poses, content: p.manifest.content }
+    })()`)
+    const poseShots = {}
+    const poseChecks = [['素材里探测到姿态差分', poseInfo.count > 0]]
+    console.log(
+      `\n姿势：素材 ${poseInfo.count} 张（${poseInfo.available.map((p) => `${p.id}=${p.label}`).join('、') || '无'}）`,
+    )
+
+    if (poseInfo.count > 0) {
+      await freezeIdle(true)
+      await setMouth(0)
+      await evaluate(`window.__nexusPortrait.setExpression(null)`)
+      const setPose = async (id) => {
+        await evaluate(`window.__nexusPortrait.setPose(${id === null ? 'null' : `'${id}'`})`)
+        await sleep(400) // 交叉淡入淡出 170ms，留够一帧余量
+        return layers()
+      }
+
+      const rest = await shoot('pose-rest')
+      for (const p of poseInfo.available) {
+        const on = await setPose(p.id)
+        const shot = await shoot(`pose-${p.id}`)
+        const off = await setPose(null)
+        poseShots[p.id] = { on: shot, rest }
+        console.log(
+          `  ${p.label}(${p.id})：摆上→图层 ${on.poseVisible ? `显示「${on.poseId}」` : '未显示 ❌'}` +
+            `、混合 ${on.poseMix.toFixed(2)}、底图 alpha ${on.bodyAlpha.toFixed(2)}` +
+            `｜收回→ ${off.poseVisible ? '没收干净 ❌' : '已回到原姿势 ✅'}`,
+        )
+        poseChecks.push(
+          [`${p.label}：姿态图真的画上去了`, on.poseVisible && on.poseId === p.id],
+          [`${p.label}：底图淡到 0（没有两张身体叠着）`, on.poseMix > 0.99 && on.bodyAlpha < 0.01],
+          [`${p.label}：收回后底图完全恢复`, off.poseVisible === false && off.bodyAlpha > 0.99],
+        )
+      }
+
+      // greet()：她登场时打招呼走的就是这条，必须限时、自己能收回
+      await evaluate(`window.__nexusPortrait.stage.greet()`)
+      await sleep(400)
+      const greeting = await layers()
+      await sleep(3600)
+      const afterGreeting = await layers()
+      poseChecks.push([
+        '打招呼（greet）会招手，并且几秒后自己收回',
+        greeting.poseVisible === true && afterGreeting.poseVisible === false,
+      ])
+      console.log(
+        `  打招呼：${greeting.poseVisible ? `摆出「${greeting.poseId}」` : '没反应 ❌'} → 3.6s 后 ${afterGreeting.poseVisible ? '还举着手 ❌' : '已收回 ✅'}`,
+      )
+      // 打招呼这条会顺手把底图 alpha 也带回去，别让后面的用例测到半截状态
+      await sleep(300)
+    }
+
+    let poseOk = true
+    for (const [label, pass] of poseChecks) {
+      if (!pass) poseOk = false
+      console.log(`  ${pass ? '✅' : '❌'} ${label}`)
+    }
+    if (!poseOk) console.log('  ⚠ 姿势用例有失败项')
+    writeFileSync(
+      join(OUT_DIR, 'poses.json'),
+      JSON.stringify({ poseInfo, shots: poseShots }, null, 2),
     )
   }
 

@@ -62,6 +62,7 @@ const FEATURE_LABELS: Record<keyof CharacterFeatures, string> = {
   hairSway: '头发飘动',
   motions: '动作组',
   expressions: '表情',
+  poses: '姿态（招手）',
 }
 
 const featureText = computed(() => {
@@ -74,6 +75,7 @@ const featureText = computed(() => {
   if (f.hairSway) on.push(FEATURE_LABELS.hairSway)
   if (f.motions) on.push(FEATURE_LABELS.motions)
   if (f.expressions) on.push(FEATURE_LABELS.expressions)
+  if (f.poses) on.push(FEATURE_LABELS.poses)
   // 口型：立绘看差分张数，Live2D 是参数驱动 —— 不能混成一个数字，否则会误导
   on.push(
     kind === 'live2d'

@@ -133,6 +133,36 @@ if (expression.ok) {
   console.log(`表情按钮：${expression.reason}（Live2D 角色属于正常）`)
 }
 
+// 姿势按钮（招手）：同一条用户路径。注意姿态要等交叉淡入淡出，所以多等一会儿
+const pose = await evaluate(`(async () => {
+  const chip = [...document.querySelectorAll('.test-bar button')].find((x) => /招手|打招呼/.test(x.textContent || ''))
+  if (!chip) return { ok: false, reason: '控制条上没有姿势按钮' }
+  const label = chip.textContent.trim()
+  const read = () => {
+    const p = window.__nexusPortrait
+    const l = p.layers()
+    return { visible: l.poseVisible, id: l.poseId, mix: +l.poseMix.toFixed(2), bodyAlpha: +l.bodyAlpha.toFixed(2) }
+  }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  chip.click()
+  await wait(450)
+  const on = read()
+  chip.click()
+  await wait(450)
+  const off = read()
+  return { ok: true, label, on, off }
+})()`)
+if (pose.ok) {
+  const good = pose.on?.visible === true && pose.on?.mix === 1 && pose.off?.visible === false
+  console.log(
+    `点姿势按钮「${pose.label}」：摆上 → ${pose.on?.visible ? `「${pose.on.id}」混合 ${pose.on.mix}、底图 alpha ${pose.on.bodyAlpha}` : '没反应 ❌'}` +
+      `｜再点一下 → ${pose.off?.visible ? '没收回去 ❌' : '回到原姿势 ✅'}`,
+  )
+  if (!good) process.exitCode = 1
+} else {
+  console.log(`姿势按钮：${pose.reason}（Live2D 角色属于正常）`)
+}
+
 const opened = await evaluate(`(() => {
   const b = [...document.querySelectorAll('button')].find((x) => /设置|⚙/.test(x.textContent || ''))
   if (!b) return { ok: false }

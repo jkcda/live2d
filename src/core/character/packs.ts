@@ -28,6 +28,7 @@
 
 import { loadCharacterKind, saveCharacterKind, type CharacterKind } from './mode'
 import { EXPRESSION_SPECS, expressionFileNames } from '../portrait/expressions'
+import { POSE_SPECS, poseFileNames } from '../portrait/poses'
 
 /** 立绘素材目录里各文件的存在性（探测出来的，不是配置里写的） */
 export interface PortraitProbe {
@@ -42,6 +43,8 @@ export interface PortraitProbe {
   hairBack: boolean
   /** 探测到的表情差分 id（`expr_<id>.png`，中文别名也算）；空数组 = 一张都没有 */
   expressions: string[]
+  /** 探测到的姿态差分 id（`pose_<id>.png`）；空数组 = 一张都没有 */
+  poses: string[]
 }
 
 /**
@@ -71,6 +74,13 @@ export interface CharacterFeatures {
   motions: boolean
   /** 有表情可切（只有 Live2D） */
   expressions: boolean
+  /**
+   * 有姿势可切（招手之类，只有立绘）。
+   *
+   * Live2D 恒为 false：它的姿态本来就是动作组（`motions`），
+   * 再声明一个 `poses` 只会让人以为模型缺什么素材。
+   */
+  poses: boolean
 }
 
 /** 按角色覆盖的可调参数；不写就用全局默认 */
@@ -170,7 +180,18 @@ export async function probePortrait(dir: string): Promise<PortraitProbe> {
     )
   ).filter((id): id is string => id !== null)
 
-  return { body, mouths, eyesClosed, eyesOpen, pupil, hairFront, hairBack, expressions }
+  const poses = (
+    await Promise.all(
+      POSE_SPECS.map(async (spec) => {
+        for (const name of poseFileNames(spec)) {
+          if (await probeAsset(`${base}pose_${name}.png`)) return spec.id
+        }
+        return null
+      }),
+    )
+  ).filter((id): id is string => id !== null)
+
+  return { body, mouths, eyesClosed, eyesOpen, pupil, hairFront, hairBack, expressions, poses }
 }
 
 /** 由探测结果推出能力表（配置里写的声明不作数，实测才算） */
@@ -183,6 +204,7 @@ export function featuresOf(pack: CharacterPack, probe?: PortraitProbe): Characte
       hairSway: true, // 头发物理在模型里，参数一动就飘
       motions: true,
       expressions: true,
+      poses: false, // 姿态是动作组的事，见 CharacterFeatures.poses
     }
   }
   return {
@@ -194,6 +216,8 @@ export function featuresOf(pack: CharacterPack, probe?: PortraitProbe): Characte
     motions: false,
     // 立绘的表情 = 画好的差分图（expr_<id>.png），探测到几张就有几个情绪
     expressions: (probe?.expressions.length ?? 0) > 0,
+    // 姿态 = 整身替换图（pose_<id>.png），有了才谈得上"招手打招呼"
+    poses: (probe?.poses.length ?? 0) > 0,
   }
 }
 
