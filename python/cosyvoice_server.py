@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 # ── 先把 CosyVoice 仓库挂进 sys.path，再 import ──
 COSY_ROOT = Path(os.environ.get("NEXUS_COSY_ROOT", r"D:\cosyvoice"))
@@ -294,7 +295,16 @@ def tts(req: TTSRequest) -> Response:
     return Response(
         content=buf.getvalue(),
         media_type="audio/wav",
-        headers={"X-Engine": "cosyvoice2", "X-Voice": voice, "X-Sample-Rate": str(sample_rate)},
+        headers={
+            "X-Engine": "cosyvoice2",
+            # ★ 音色名要**百分号编码**才能进响应头。
+            #   HTTP 头是 latin-1 编码的，音色名却可以是中文（用户就注册了一个叫「少女」的）——
+            #   直接把中文塞进头里，starlette 构造响应时就会抛
+            #   UnicodeEncodeError: 'latin-1' codec can't encode ...，
+            #   表现是整个 /tts 500（而且是"只有中文名音色才 500"这种最难猜的规律）。
+            "X-Voice": quote(voice, safe=""),
+            "X-Sample-Rate": str(sample_rate),
+        },
     )
 
 
