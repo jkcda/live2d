@@ -28,7 +28,19 @@ def create_engine(name: str | None = None) -> TTSEngine:
         return SapiEngine(sample_rate=settings.sample_rate)
 
     if key == "cosyvoice":
-        # 延迟导入：没装 torch 的人不该因为 import 就起不来服务
+        # ★ 优先走「远程模式」：CosyVoice 跑在它自己的环境里（Python 3.10 + cu121 torch，
+        #   约 7GB），而且声纹要预先注册、模型要预热 —— 那些状态属于**长期活着的模型进程**，
+        #   不属于每个请求来处理一下的服务进程。实测：注册前 RTF 1.12、注册后 0.89。
+        #   设了 NEXUS_COSYVOICE_URL 就转发过去（推荐路径）；
+        #   没设才尝试本地加载 —— 那要求本环境有 GPU 版 torch，一般不会满足。
+        import os
+
+        remote = (os.environ.get("NEXUS_COSYVOICE_URL") or "").strip()
+        if remote:
+            from .cosyvoice_remote import CosyVoiceRemoteEngine
+
+            return CosyVoiceRemoteEngine(url=remote, sample_rate=settings.sample_rate)
+
         from .cosyvoice import CosyVoiceEngine
 
         return CosyVoiceEngine(
