@@ -33,6 +33,21 @@ const DEFAULT_HASH_THRESHOLD = 6
 /** 两次「值得上报」之间的最小间隔 */
 const DEFAULT_MIN_GAP_MS = 8000
 
+/**
+ * 一帧屏幕截图。
+ *
+ * ══ 生命周期契约（接渲染层时务必遵守）══
+ *
+ * 一帧的 `dataUrl` 是几百 KB 的 base64 字符串，背后还有 NativeImage 的原生位图。
+ * 它**不能被攒着**，否则就是「越堆越多最后炸掉」的典型。三条约束：
+ *
+ *   1. **只留最近一帧**。渲染层持有的是一个会被覆盖的变量，不是数组、不是队列。
+ *   2. **绝不进历史**。`localStorage` 配额一般 5MB，一张图就能吃掉一大半；
+ *      而且她也不需要「三天前看到的那张截图」。存盘前必须摘掉。
+ *   3. **用完就丢引用**。JS 的字符串和 NativeImage 都靠 GC 回收，
+ *      「释放」= 没有引用指向它。别在闭包、缓存、日志里留副本
+ *      （尤其别 `console.log(frame)` —— 开发者工具的 console 会一直握着它）。
+ */
 export interface ScreenFrame {
   /** data URL，可直接塞进 image_url */
   dataUrl: string
@@ -123,6 +138,13 @@ export async function captureForeground(): Promise<ScreenFrame | null> {
     thumbnailSize: { width: physBounds.width, height: physBounds.height },
   })
 
+  /*
+   * ⚠️ getSources 会**给所有显示器**都生成缩略图，没法只要一块。
+   * 双屏 4K 的话每次抓图都会多出两个几十兆的原生位图。
+   *
+   * 这里没有引用泄漏（都是局部变量，函数返回后即可回收），但调用频率
+   * 不能高 —— 所以变化门控的最小间隔是有意义的，不只是为了省 token。
+   */
   const source =
     sources.find((s) => s.display_id === String(display.id)) ??
     sources.find((s) => s.thumbnail.getSize().width > 0)

@@ -92,6 +92,22 @@ export class AudioPlayer {
     src.connect(this.analyser!)
 
     src.onended = () => {
+      /*
+       * 自然播完也要 disconnect。
+       *
+       * 原来只有 stop()（打断那条路）才断，正常播完的节点就一直连着 analyser。
+       * 断开之后它才确定可回收 —— 这是 Web Audio 的标准做法。
+       *
+       * 说清楚边界：**我没有实测过不断开就一定泄漏**（那需要真实浏览器里
+       * 量音频线程的内存，Node 里没有 Web Audio）。但一个播完的节点
+       * 还挂在图上没有任何好处，显式断开的代价也几乎为零。
+       */
+      try {
+        src.disconnect()
+      } catch {
+        // 已经断开了
+      }
+
       if (this.source === src) {
         this.source = null
         this.playing = false
