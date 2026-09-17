@@ -30,6 +30,30 @@ $logs = Join-Path $root "logs"
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
 $pidFile = Join-Path $logs "pids.json"
 
+<#
+  ★ 清掉大小写重复的代理变量 —— 不清的话下面四个 Start-Process 全部失败。
+
+  Windows 的环境变量块里可以同时存在 http_proxy 和 HTTP_PROXY，
+  而 .NET 的 ProcessStartInfo.EnvironmentVariables 是个**大小写不敏感**的字典，
+  Start-Process 往里塞的时候就撞键：
+
+      Start-Process : 已添加项。字典中的关键字:"http_proxy"所添加的关键字:"HTTP_PROXY"
+
+  报错信息里完全看不出跟代理有关，表现是"四个服务一个都没起来"。
+
+  而同时设两种写法是**很常见**的：Python 的 requests 读小写、很多 CLI 读大写，
+  不少安装脚本/容器/代理软件就两套都写。撞上了极难排查。
+
+  这里只保留大写那套（更通行的约定），小写清掉。
+  注意 PowerShell 的 Env: 提供程序本身就是大小写不敏感的，
+  所以删一个就够，不用删两遍。
+#>
+foreach ($name in 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy') {
+  if (Test-Path "Env:$name") {
+    Remove-Item -Path "Env:$name" -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Test-Port([int]$port) {
   return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
