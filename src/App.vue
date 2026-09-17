@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, onMounted, ref } from 'vue'
+import { computed, onUnmounted, onMounted, ref, watch } from 'vue'
 import CharacterStage from './components/CharacterStage.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -59,13 +59,53 @@ const showBar = computed(
   () => !passthrough.value && (barRevealed.value || barPinned.value),
 )
 
+/**
+ * 面板开着 → 窗口需要键盘焦点；关掉 → 立刻摘掉，回到「点她不抢焦点」。
+ *
+ * 主进程那边是给窗口打/摘 WS_EX_NOACTIVATE。刻意不用 Electron 的
+ * `focusable: false` —— 那个会把 mousedown 一起吃掉，表现为点她没反应。
+ */
+watch(
+  () => showChat.value || showSettings.value,
+  (open) => {
+    void window.nexus?.setPanelOpen(open)
+  },
+)
+
+let unsubscribeOpenPanel: (() => void) | null = null
+let unsubscribeResetHover: (() => void) | null = null
+
 onMounted(async () => {
   if (window.nexus) {
     version.value = await window.nexus.version()
+
+    // 托盘菜单点了「和她说话…」/「设置…」时从这里进来
+    unsubscribeOpenPanel = window.nexus.onOpenPanel((panel) => {
+      if (panel === 'chat') {
+        showChat.value = true
+        showSettings.value = false
+      } else {
+        showSettings.value = true
+      }
+      revealBar()
+    })
+
+    /*
+     * 窗口重新显示后，主进程会把窗口强设成穿透态（那是 setIgnoreMouseEvents
+     * 转发失效后的必要重设）。但渲染层自己记的状态没变，两边就不一致了 ——
+     * 这里按渲染层认定的状态重新同步回去。
+     */
+    unsubscribeResetHover = window.nexus.onResetHover(() => {
+      void window.nexus?.setInteractive(!passthrough.value)
+    })
   }
 })
 
-onUnmounted(() => window.clearTimeout(hideTimer))
+onUnmounted(() => {
+  window.clearTimeout(hideTimer)
+  unsubscribeOpenPanel?.()
+  unsubscribeResetHover?.()
+})
 
 /** 切换点击穿透：穿透后鼠标事件直接落到桌面上 */
 async function togglePassthrough() {
@@ -94,6 +134,9 @@ function closeSettings() {
 async function hide() {
   chatSession.interrupt()
   voiceOutput.interrupt()
+  // 面板一起收掉：否则窗口藏起来时它还开着，再显示出来焦点状态是错的
+  showChat.value = false
+  showSettings.value = false
   await window.nexus?.hide()
 }
 
