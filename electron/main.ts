@@ -173,9 +173,15 @@ function refreshTrayMenu() {
 }
 
 function createTray() {
-  // 托盘图标在 16x16 下显示，32 的图给 @2x 屏用，缩到 16 才不糊
+  /*
+   * 不要把 32 的图 resize 成 16。
+   *
+   * Windows 托盘按 SM_CXSMICON 渲染 —— 100% 缩放是 16px，150% 是 24px，200% 是 32px。
+   * 预先压到 16 的话，在 150% / 200% 下会被**放大**回去，边缘直接糊。
+   * 直接把 32 交给系统缩：200% 下 1:1，其余情况是缩小 —— 都比放大好。
+   */
   const icon = nativeImage.createFromPath(assetPath('tray.png'))
-  const image = icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 })
+  const image = icon.isEmpty() ? nativeImage.createEmpty() : icon
 
   tray = new Tray(image)
   tray.setToolTip('澪')
@@ -212,6 +218,16 @@ ipcMain.handle('window:setPanelOpen', (_e, open: boolean) => {
 })
 
 ipcMain.handle('window:hide', () => {
+  /*
+   * 没有托盘时拒绝隐藏。
+   *
+   * 藏起来就再也叫不出来了 —— Ctrl+Shift+H 能救回来，但用户不知道这个快捷键。
+   * 返回 false，调用方可以据此提示；什么都不做也好过变成看不见的幽灵。
+   */
+  if (!tray) {
+    console.warn('[main] 没有托盘，拒绝隐藏窗口（否则无法再唤出）')
+    return false
+  }
   win?.hide()
   refreshTrayMenu()
   return true
@@ -229,7 +245,19 @@ app.whenReady().then(() => {
   }
 
   createWindow()
-  createTray()
+
+  try {
+    createTray()
+  } catch (err) {
+    /*
+     * 托盘建不起来（精简系统、权限受限、explorer 异常都会）。
+     * 不能就这么算了 —— 没有托盘又没有窗口，进程就成了「看不见也关不掉」的幽灵。
+     * 这里把 tray 置空，让 window-all-closed 恢复「关掉即退出」，
+     * 并且 window:hide 会拒绝隐藏（见那里的注释）。
+     */
+    tray = null
+    console.error('[main] 托盘创建失败，已退回「关窗即退出」模式', err)
+  }
 
   // 全局快捷键：H 显隐，Q 退出
   globalShortcut.register('CommandOrControl+Shift+H', () => {
@@ -239,6 +267,8 @@ app.whenReady().then(() => {
   globalShortcut.register('CommandOrControl+Shift+Q', () => {
     app.quit()
   })
+
+  console.log('[main] 快捷键：Ctrl+Shift+H 显隐角色，Ctrl+Shift+Q 退出')
 })
 
 app.on('will-quit', () => {
@@ -248,15 +278,14 @@ app.on('will-quit', () => {
 })
 
 /*
- * 有托盘之后，窗口全关 ≠ 退出。
+ * 有托盘时：窗口全关 ≠ 退出。
+ * 桌宠的预期是「关掉角色，她还在托盘里待着」；这里 app.quit() 的话，
+ * 用户点一次关闭她整个人就没了，下次还得重新启动 —— 托盘就白做了。
  *
- * 桌宠的预期是「关掉角色，她还在托盘里待着」；
- * 如果这里 app.quit()，用户点一次关闭她整个人就没了，
- * 下次还得重新启动 —— 托盘就白做了。
- * 真正退出走托盘菜单或 Ctrl+Shift+Q。
+ * 没有托盘时：必须退出。否则没有窗口也没有托盘，进程就变成幽灵了。
  */
 app.on('window-all-closed', () => {
-  // 故意什么都不做
+  if (!tray) app.quit()
 })
 
 app.on('activate', () => {

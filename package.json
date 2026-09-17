@@ -44,6 +44,9 @@
       "dist/**/*",
       "dist-electron/**/*"
     ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
     "extraResources": [
       {
         "from": "public/models",
