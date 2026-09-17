@@ -85,7 +85,8 @@ let api: {
   GetForegroundWindow: () => bigint
   GetWindowTextW: (hwnd: bigint, buf: Uint16Array, max: number) => number
   GetWindowThreadProcessId: (hwnd: bigint, pid: Uint32Array) => number
-  GetWindowRect: (hwnd: bigint, rect: Int32Array) => boolean
+  GetClientRect: (hwnd: bigint, rect: Int32Array) => boolean
+  ClientToScreen: (hwnd: bigint, pt: Int32Array) => boolean
   OpenProcess: (access: number, inherit: boolean, pid: number) => bigint
   QueryFullProcessImageNameW: (
     handle: bigint,
@@ -112,7 +113,8 @@ function ensureApi(): typeof api {
       GetForegroundWindow: user32.func('uint64 GetForegroundWindow()'),
       GetWindowTextW: user32.func('int32 GetWindowTextW(uint64 hWnd, _Out_ uint16 *lp, int32 nMax)'),
       GetWindowThreadProcessId: user32.func('uint32 GetWindowThreadProcessId(uint64 hWnd, _Out_ uint32 *pid)'),
-      GetWindowRect: user32.func('bool GetWindowRect(uint64 hWnd, _Out_ int32 *rect)'),
+      GetClientRect: user32.func('bool GetClientRect(uint64 hWnd, _Out_ int32 *rect)'),
+      ClientToScreen: user32.func('bool ClientToScreen(uint64 hWnd, _Inout_ int32 *pt)'),
       OpenProcess: kernel32.func('uint64 OpenProcess(uint32 access, bool inherit, uint32 pid)'),
       QueryFullProcessImageNameW: kernel32.func(
         'bool QueryFullProcessImageNameW(uint64 handle, uint32 flags, _Out_ uint16 *buf, _Inout_ uint32 *size)',
@@ -128,7 +130,34 @@ function ensureApi(): typeof api {
 
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
-function readForeground(): { process: string; title: string; pid: number } | null {
+/** 窗口在屏幕坐标系里的矩形（物理像素） */
+export interface WindowRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ForegroundWindow {
+  process: string
+  title: string
+  pid: number
+  /** 拿不到有效矩形时为 null（最小化的窗口就是这样） */
+  rect: WindowRect | null
+}
+
+/**
+ * 读一次前台窗口：进程 / 标题 / pid / 屏幕矩形。
+ *
+ * ★ 为什么必须是「一次读、一个结果」
+ *
+ * 判断（这个窗口能不能看）和裁剪（截哪一块）如果分两次读，
+ * 中间前台窗口就可能换人 —— **判的是 A、裁的是 B，敏感窗口就这么漏出去了**。
+ * 这不是理论风险：实测前台窗口每秒都在翻。
+ *
+ * 所以观察和截图都走这一个函数，判和裁用同一份数据。
+ */
+export function foregroundWindow(): ForegroundWindow | null {
   const fn = ensureApi()
   if (!fn) return null
 
@@ -147,20 +176,126 @@ function readForeground(): { process: string; title: string; pid: number } | nul
   const pid = pidBuf[0]
   if (!pid) return null
 
+  const rect = readRect(hwnd)
+
   const handle = fn.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-  if (!handle) return { process: `pid:${pid}`, title, pid }
+  if (!handle) return { process: `pid:${pid}`, title, pid, rect }
 
   try {
     const pathBuf = new Uint16Array(1024)
     const sizeBuf = new Uint32Array([1024])
     const ok = fn.QueryFullProcessImageNameW(handle, 0, pathBuf, sizeBuf)
-    if (!ok || sizeBuf[0] === 0) return { process: `pid:${pid}`, title, pid }
+    if (!ok || sizeBuf[0] === 0) return { process: `pid:${pid}`, title, pid, rect }
 
     const full = Buffer.from(pathBuf.buffer, 0, sizeBuf[0] * 2).toString('utf16le')
-    return { process: basename(full), title, pid }
+    return { process: basename(full), title, pid, rect }
   } finally {
     fn.CloseHandle(handle)
   }
+}
+
+/**
+ * 最小化窗口的坐标哨兵值。
+ *
+ * ★ 只查 width/height 是不够的（踩过）：
+ *   最小化窗口的 GetWindowRect 是 (-32000, -32000, -31840, -31972) ——
+ *   **宽高是正的**（160×28），所以 `width <= 0` 那个检查根本拦不住它。
+ *   放过去之后裁剪坐标会变成负数，被 clamp 夹到 0，
+ *   结果截出来是**桌面左上角那块无关内容** —— 既错又是隐私问题。
+ */
+const MINIMIZED_COORD = -30000
+
+/**
+ * 读窗口的**客户区**（去掉标题栏和边框），屏幕坐标。
+ *
+ * ══ 为什么不用 GetWindowRect ══
+ *
+ * 两个原因，都在微软文档里写着：
+ *
+ * 1. **它含标题栏**。而标题栏里就是窗口标题 ——
+ *    「离职申请.docx - WPS」这种，黑名单不一定命中，但图一出去就漏了。
+ *    想只去掉隐形边框的话可以用 DWMWA_EXTENDED_FRAME_BOUNDS，
+ *    但它给的是「**可见**窗口边界」，标题栏属于可见部分，**照样去不掉**。
+ *    要去干净只能走客户区。
+ *
+ * 2. **它是 DPI 虚拟化的**（文档原话）。DPI-unaware 的进程拿到的
+ *    是缩放后的坐标 —— 实测同一块屏上 GetWindowRect 给 2062×1118，
+ *    而 EXTENDED_FRAME_BOUNDS 给 2560×1380（=屏幕物理尺寸，比值 1.24 ≈ 125%）。
+ *    客户区这一路同样会虚拟化，所以**坐标空间的问题没有消失**，
+ *    见 screen.ts 里那道自检。
+ */
+function readRect(hwnd: bigint): WindowRect | null {
+  const fn = ensureApi()
+  if (!fn) return null
+
+  // GetClientRect 给的是**客户区在窗口内的坐标**（左上角通常是 0,0），
+  // 要再 ClientToScreen 一次才是屏幕坐标
+  const c = new Int32Array(4)
+  if (!fn.GetClientRect(hwnd, c)) return null
+
+  const pt = new Int32Array([c[0], c[1]])
+  if (!fn.ClientToScreen(hwnd, pt)) return null
+
+  const left = pt[0]
+  const top = pt[1]
+  const width = c[2] - c[0]
+  const height = c[3] - c[1]
+
+  // 最小化 / 坐标离谱 → 当作没有有效矩形，别让下游拿到一个会裁错的框
+  if (left <= MINIMIZED_COORD || top <= MINIMIZED_COORD) return null
+  if (width <= 0 || height <= 0) return null
+
+  return { x: left, y: top, width, height }
+}
+
+/**
+ * 屏蔽规则。
+ *
+ * ★ 为什么是模块级的单例，而不是观察器的实例字段
+ *
+ * 以前它是 `ActivityObserver` 的私有字段，于是**截图那条路根本拿不到它** ——
+ * 结果是判断和裁剪走了两套东西（见 foregroundWindow 的注释）。
+ * 名单要是再各抄一份，后果不是「功能不对」而是**隐私边界漏了**：
+ * 观察挡住了、截图没挡，图就出去了。
+ *
+ * 所以：一份名单，一个判断函数，两条路都调它。
+ */
+class Blocklist {
+  private processes = new Set(DEFAULT_BLOCKED_PROCESSES)
+  private patterns = [...DEFAULT_BLOCKED_TITLE_PATTERNS]
+
+  /** 追加用户自定义的屏蔽词（进程名或标题关键词都走这里） */
+  add(words: string[]): void {
+    for (const raw of words) {
+      const w = raw.trim()
+      if (!w) continue
+      if (w.toLowerCase().endsWith('.exe')) this.processes.add(w.toLowerCase())
+      else this.patterns.push(w)
+    }
+  }
+
+  has(processName: string, title: string): boolean {
+    if (this.processes.has(processName.toLowerCase())) return true
+    const lower = title.toLowerCase()
+    return this.patterns.some((p) => lower.includes(p.toLowerCase()))
+  }
+}
+
+export const blocklist = new Blocklist()
+
+/**
+ * 这个窗口此刻该不该被看。
+ *
+ * 两条：**不在黑名单**、且**不是应用自己**。
+ *
+ * 观察和截图都必须过这一关 —— 而且**必须用同一次读到的数据**。
+ * 拆成两个函数、两次读，中间前台窗口换人就会漏（见 foregroundWindow）。
+ */
+export function isObservable(fg: ForegroundWindow): boolean {
+  // 她自己的窗口不算「他在干嘛」：面板打开时主进程会 focus()，
+  // 所以「他问我在干嘛」的那一刻前台恰恰是应用自己
+  if (fg.pid === process.pid) return false
+  return !blocklist.has(fg.process, fg.title)
 }
 
 export class ActivityObserver {
@@ -168,14 +303,6 @@ export class ActivityObserver {
   private current: Activity | null = null
   private lastChangeAt = 0
   private _paused = false
-
-  private blockedProcesses: Set<string>
-  private blockedPatterns: string[]
-
-  constructor() {
-    this.blockedProcesses = new Set(DEFAULT_BLOCKED_PROCESSES)
-    this.blockedPatterns = [...DEFAULT_BLOCKED_TITLE_PATTERNS]
-  }
 
   get paused(): boolean {
     return this._paused
@@ -196,13 +323,9 @@ export class ActivityObserver {
   }
 
   /** 追加用户自定义的屏蔽词（进程名或标题关键词都走这里） */
+  /** 追加用户自定义的屏蔽词（转发给模块级那份名单，见 Blocklist 的注释） */
   addBlocked(words: string[]): void {
-    for (const raw of words) {
-      const w = raw.trim()
-      if (!w) continue
-      if (w.toLowerCase().endsWith('.exe')) this.blockedProcesses.add(w.toLowerCase())
-      else this.blockedPatterns.push(w)
-    }
+    blocklist.add(words)
   }
 
   start(): void {
@@ -226,33 +349,32 @@ export class ActivityObserver {
   private tick(): void {
     if (this._paused) return
 
-    const raw = readForeground()
-    if (!raw) return
+    const fg = foregroundWindow()
+    if (!fg) return
 
     /*
-     * ★ 她自己的窗口不算「他在干嘛」。
+     * ★ 该不该看，走的是和截图**同一个** isObservable()。
      *
      * 这一条是整块功能最容易踩空的地方：对话面板必须能打键盘，所以主进程
      * 在面板打开时会 focus() —— 也就是说**他问「我在干嘛」的那一刻，
      * 前台窗口恰恰是应用自己**。不排掉的话，她看到的永远是
      * 「Nexus Live2D」，而且是在最该看准的那个场景里看错。
      *
-     * 这里用 return 而不是清空 current：他自己的窗口不该把上一次真实的活动抹掉
+     * 命中时用 return 而不是清空 current：他自己的窗口不该把上一次真实的活动抹掉
      * （他不是"不干什么了"，只是在跟她说话）。
      */
-    if (raw.pid === process.pid) return
-
-    // ★ 黑名单在这里拦。命中的连标题都不往 current 里放。
-    if (this.isBlocked(raw.process, raw.title)) {
-      if (this.current !== null) {
+    if (!isObservable(fg)) {
+      // 黑名单命中时要把 current 清掉（否则她会一直以为他还在那个敏感窗口）；
+      // 但「是应用自己」不清 —— 两种情况的处理不一样，所以分开判
+      if (blocklist.has(fg.process, fg.title) && this.current !== null) {
         this.current = null
         console.log('[observer] 前台窗口命中屏蔽规则，已隐藏')
       }
       return
     }
 
-    const title = raw.title.slice(0, MAX_TITLE_LEN)
-    const processName = raw.process
+    const title = fg.title.slice(0, MAX_TITLE_LEN)
+    const processName = fg.process
 
     // 没变就什么都不做 —— 这是变化门控的核心
     if (this.current && this.current.process === processName && this.current.title === title) {
@@ -266,11 +388,6 @@ export class ActivityObserver {
     this.current = { process: processName, title, since: now }
   }
 
-  private isBlocked(processName: string, title: string): boolean {
-    if (this.blockedProcesses.has(processName.toLowerCase())) return true
-    const lower = title.toLowerCase()
-    return this.blockedPatterns.some((p) => lower.includes(p.toLowerCase()))
-  }
 }
 
 /** 给渲染层用的可序列化快照（附带「持续了多久」） */
@@ -285,39 +402,4 @@ export function activitySnapshot(observer: ActivityObserver): Record<string, unk
   }
 }
 
-/**
- * 前台窗口在**屏幕坐标系**里的矩形（物理像素）。
- *
- * 截图要按它裁 —— 只截前台窗口那一块，不截全桌面。
- * 多显示器下截全屏等于一半是空白，还顺带把另一块屏上的东西也送出去了。
- *
- * 注意这是**物理像素**，Electron 的 screen 模块用的是 DIP，
- * 两者在高 DPI 下不一样，转换在 screen.ts 里做。
- *
- * 返回 null 表示读不到（非 Windows / koffi 挂了 / 窗口最小化了）。
- */
-export function foregroundWindowRect(): {
-  x: number
-  y: number
-  width: number
-  height: number
-} | null {
-  const fn = ensureApi()
-  if (!fn) return null
 
-  const hwnd = fn.GetForegroundWindow()
-  if (!hwnd) return null
-
-  // RECT 是 4 个 int32：left, top, right, bottom
-  const rect = new Int32Array(4)
-  if (!fn.GetWindowRect(hwnd, rect)) return null
-
-  const [left, top, right, bottom] = rect
-  const width = right - left
-  const height = bottom - top
-
-  // 最小化的窗口会给出离谱的负坐标（-32000 那类），挡掉
-  if (width <= 0 || height <= 0) return null
-
-  return { x: left, y: top, width, height }
-}

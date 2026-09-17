@@ -73,6 +73,14 @@ const observer = new ActivityObserver()
 const screenGate = new ScreenGate()
 
 /**
+ * 允许渲染层用 `force` 绕过变化门控。
+ *
+ * **只有验证脚本该开这个**（tools/verify-screen.mjs 会设）。
+ * 默认关着 —— 一个从页面就能调的「跳过限流」后门不该在生产里可达。
+ */
+const ALLOW_FORCE_CAPTURE = process.env.NEXUS_ALLOW_FORCE_CAPTURE === '1'
+
+/**
  * 取静态资源的绝对路径。
  *
  * 开发时主进程在 `dist-electron/`，静态资源在 `public/`；
@@ -408,19 +416,27 @@ ipcMain.handle('observe:status', () => ({
 /**
  * 抓一张前台窗口的截图。
  *
- * ★ 三道闸门在这里收口，别在别处再判一遍 —— 两处名单迟早不同步：
+ * ★ 黑名单那一道闸门**不在这里**，在 captureForeground 里面 ——
+ * 因为它必须和裁剪用**同一次读**的前台窗口。放在这儿判的话就是拿
+ * `observer.snapshot()`（1 秒轮询、只在变化时更新）去判，而裁的是实时窗口，
+ * 中间能对不上：切到敏感窗口后 ≤1s 内抓图，判的是 A、裁的是 B。
  *
- *   1. `observer.snapshot()` 为 null 就不截。它已经覆盖了「暂停中 / 命中黑名单 /
- *      前台是应用自己」三种情况。截图直接复用这一份判断，不另写一遍。
- *   2. 变化门控：画面没怎么变就不给。`force` 可绕过，验证脚本用。
- *   3. 只截前台窗口那一块 —— 在 screen.ts 里做。
+ * 所以这里只管「变化门控」这一道（它是对已抓到的图做判断，没有窗口期问题）。
  */
 ipcMain.handle('screen:capture', async (_e, force = false) => {
-  if (!observer.snapshot()) return null
-
   const frame = await captureForeground()
   if (!frame) return null
-  if (!force && !screenGate.accept(frame)) return null
+
+  /*
+   * force 只有验证脚本能用。
+   *
+   * 它是从渲染层传进来的参数，等于把「绕过速率限制」暴露给了页面 ——
+   * 黑名单仍然管用（那道闸门在 captureForeground 里，不经过这里），
+   * 但调试用的后门不该在生产里可达。用环境变量把它关在门外。
+   */
+  const bypass = force === true && ALLOW_FORCE_CAPTURE
+  if (!bypass && !screenGate.accept(frame)) return null
+
   return frame
 })
 

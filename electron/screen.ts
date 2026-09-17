@@ -19,7 +19,7 @@
  */
 
 import { desktopCapturer, screen, type NativeImage } from 'electron'
-import { foregroundWindowRect } from './observer.js'
+import { foregroundWindow, isObservable } from './observer.js'
 
 /** 长边上限。1080p 全屏进去很贵，压到 1024 以内 */
 const MAX_EDGE = 1024
@@ -119,14 +119,29 @@ function clampCrop(
 /**
  * 抓一张前台窗口的截图。
  *
- * **调用前必须确认当前活动可见**（observer.snapshot() 非 null）——
- * 那一步已经过了黑名单，这里不重复判断，免得两处名单不同步。
+ * ★ 判断和裁剪必须用**同一次读**的前台窗口
+ *
+ * 以前这里是「先用 `observer.snapshot()` 过闸、再实时读矩形去裁」。
+ * 快照是 1 秒轮询、且只在 (进程, 标题) 变化时才更新的，两者能对不上：
+ * 切到敏感窗口后 ≤1s 内触发抓图，快照还说「上一个窗口是允许的」，
+ * 裁出来的却是敏感窗口 —— **判的是 A，裁的是 B**。
+ *
+ * 这不是理论风险：实测前台窗口每秒都在翻。
+ *
+ * 现在：读一次 → 判一次 → 裁同一份数据，中间没有窗口期。
  */
 export async function captureForeground(): Promise<ScreenFrame | null> {
-  // GetWindowRect 给的是物理像素，Electron 的 screen API 用 DIP，先转
-  const physRect = foregroundWindowRect()
-  if (!physRect) return null
+  const fg = foregroundWindow()
+  if (!fg) return null
 
+  // 黑名单 + 「不是应用自己」，和观察用的是同一个判断函数
+  if (!isObservable(fg)) return null
+
+  // 没有有效矩形（最小化之类）就不截 —— 硬裁会截到桌面左上角那块无关内容
+  if (!fg.rect) return null
+
+  // GetWindowRect 给的是物理像素，Electron 的 screen API 用 DIP，先转
+  const physRect = fg.rect
   const dipRect = screen.screenToDipRect(null, physRect)
   const display = screen.getDisplayMatching(dipRect)
 
@@ -139,16 +154,24 @@ export async function captureForeground(): Promise<ScreenFrame | null> {
   })
 
   /*
-   * ⚠️ getSources 会**给所有显示器**都生成缩略图，没法只要一块。
-   * 双屏 4K 的话每次抓图都会多出两个几十兆的原生位图。
+   * ★ 匹配不上就放弃，**不要**退回「随便找一个有缩略图的」。
    *
-   * 这里没有引用泄漏（都是局部变量，函数返回后即可回收），但调用频率
-   * 不能高 —— 所以变化门控的最小间隔是有意义的，不只是为了省 token。
+   * 兜底到另一块显示器 = 拿那块屏的图、用这块屏的坐标去裁 ——
+   * 截出来是一块无关区域，而且是在隐私路径上。
+   * 这里必须 fail closed：宁可这一帧没有，也不能给一张错的。
    */
-  const source =
-    sources.find((s) => s.display_id === String(display.id)) ??
-    sources.find((s) => s.thumbnail.getSize().width > 0)
-  if (!source) return null
+  const source = sources.find((s) => s.display_id === String(display.id))
+  if (!source) {
+    console.warn('[screen] 找不到前台窗口所在显示器的截图源，放弃这一帧')
+    return null
+  }
+
+  /*
+   * ⚠️ 另外记一笔：getSources 会**给所有显示器**都生成缩略图，没法只要一块。
+   * 双屏 4K 每次抓图都会多出两个几十兆的原生位图。
+   * 没有引用泄漏（都是局部变量），但调用频率不能高 ——
+   * 所以变化门控的最小间隔不只是为了省 token，也是为这个。
+   */
 
   const thumb = source.thumbnail
   if (thumb.isEmpty()) return null
@@ -158,17 +181,37 @@ export async function captureForeground(): Promise<ScreenFrame | null> {
   const scaleX = thumbSize.width / physBounds.width
   const scaleY = thumbSize.height / physBounds.height
 
-  const cropped = thumb.crop(
-    clampCrop(
-      {
-        x: Math.round((physRect.x - physBounds.x) * scaleX),
-        y: Math.round((physRect.y - physBounds.y) * scaleY),
-        width: Math.round(physRect.width * scaleX),
-        height: Math.round(physRect.height * scaleY),
-      },
-      thumbSize,
-    ),
-  )
+  const rawCrop = {
+    x: Math.round((physRect.x - physBounds.x) * scaleX),
+    y: Math.round((physRect.y - physBounds.y) * scaleY),
+    width: Math.round(physRect.width * scaleX),
+    height: Math.round(physRect.height * scaleY),
+  }
+
+  /*
+   * ★ 坐标空间自检 —— 对不上就放弃这一帧
+   *
+   * 微软文档写着「**GetWindowRect 已虚拟化为 DPI**」：DPI-unaware 的进程
+   * 拿到的是缩放后的坐标。实测同一块屏上它给 2062×1118，而屏幕物理尺寸是
+   * 2560×1380（比值 1.24 ≈ 125% 缩放）。
+   *
+   * Electron 主进程通常是 per-monitor DPI aware 的，那拿到的就是物理像素 ——
+   * **但这个前提我不想赌**：赌错的话裁剪框会整个错位，截出一块无关区域，
+   * 而这是隐私路径。
+   *
+   * 判据很朴素：窗口不可能比它所在的显示器还大太多，也不该小到只剩几个像素。
+   * 落在这个区间外就说明坐标空间对不上，宁可这一帧没有。
+   */
+  const areaRatio = (rawCrop.width * rawCrop.height) / (thumbSize.width * thumbSize.height)
+  if (areaRatio < 0.02 || areaRatio > 1.05) {
+    console.warn(
+      `[screen] 裁剪区域占显示器 ${(areaRatio * 100).toFixed(1)}%，超出合理范围 —— ` +
+        '坐标空间可能对不上（DPI 虚拟化），放弃这一帧',
+    )
+    return null
+  }
+
+  const cropped = thumb.crop(clampCrop(rawCrop, thumbSize))
 
   const size = cropped.getSize()
   const longest = Math.max(size.width, size.height)

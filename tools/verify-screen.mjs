@@ -59,6 +59,8 @@ const GetWindowTextW = user32.func('int32 GetWindowTextW(uint64 hWnd, _Out_ uint
 const IsWindowVisible = user32.func('bool IsWindowVisible(uint64 hWnd)')
 const SetForegroundWindow = user32.func('bool SetForegroundWindow(uint64 hWnd)')
 const GetWindowRect = user32.func('bool GetWindowRect(uint64 hWnd, _Out_ int32 *rect)')
+const GetClientRect = user32.func('bool GetClientRect(uint64 hWnd, _Out_ int32 *rect)')
+const ClientToScreen = user32.func('bool ClientToScreen(uint64 hWnd, _Inout_ int32 *pt)')
 const ShowWindow = user32.func('bool ShowWindow(uint64 hWnd, int32 nCmdShow)')
 
 const GW_HWNDNEXT = 2
@@ -89,10 +91,18 @@ function findWindow(pid, titlePart) {
   return 0n
 }
 
+/**
+ * 窗口的**客户区**尺寸。
+ *
+ * 用客户区不是 GetWindowRect：主进程那边裁的就是客户区（去掉了标题栏，
+ * 因为标题栏里就是窗口标题，可能带文件名）。
+ */
 function rectOf(hwnd) {
-  const r = new Int32Array(4)
-  if (!GetWindowRect(hwnd, r)) return null
-  return { x: r[0], y: r[1], width: r[2] - r[0], height: r[3] - r[1] }
+  const c = new Int32Array(4)
+  if (!GetClientRect(hwnd, c)) return null
+  const pt = new Int32Array([c[0], c[1]])
+  if (!ClientToScreen(hwnd, pt)) return null
+  return { x: pt[0], y: pt[1], width: c[2] - c[0], height: c[3] - c[1] }
 }
 
 async function waitForWindow(pid, titlePart, timeoutMs = 20000) {
@@ -220,7 +230,9 @@ async function main() {
   console.log('启动应用主进程…')
   appProc = spawn(electron, ['.', `--remote-debugging-port=${PORT}`], {
     cwd: ROOT,
-    env,
+    // 验证脚本要能绕过变化门控去抓「同一画面的第二张」（断言⑦⑧用）。
+    // 这个后门默认关着 —— 见 main.ts 里 ALLOW_FORCE_CAPTURE 的注释。
+    env: { ...env, NEXUS_ALLOW_FORCE_CAPTURE: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let appLog = ''
@@ -274,13 +286,24 @@ async function main() {
   const longest = Math.max(frame.width, frame.height)
   check('④ 长边 ≤ 1024（降采样生效）', longest <= 1024, `${frame.width}x${frame.height}`)
 
-  // 裁到窗口 → 宽高比应该和前台窗口接近（整屏的话会被拉成屏幕的比例）
+  /*
+   * 裁到窗口 → 宽高比应该和前台窗口的客户区一致（整屏的话会被拉成屏幕的比例）。
+   *
+   * ★ 为什么比宽高比而不是比尺寸
+   *
+   * 微软文档写着「GetWindowRect 已虚拟化为 DPI」—— 这个脚本跑在普通 Node 里
+   * （DPI-unaware），拿到的坐标是缩放过的，而截图是物理像素。两边直接比尺寸
+   * 是苹果比橘子（实测能差 1.24 倍）。
+   *
+   * **宽高比是尺度无关的**，所以这条断言不受 DPI 虚拟化影响。
+   * 尺寸是否合理由主进程里那道「裁剪占比自检」兜（见 screen.ts）。
+   */
   const wr = rectOf(targetWin)
   const shotRatio = frame.width / frame.height
   const winRatio = wr ? wr.width / wr.height : 0
   const ratioDiff = winRatio ? Math.abs(shotRatio - winRatio) / winRatio : 1
   check(
-    '⑤ 宽高比和前台窗口一致（是裁过的，不是整屏）',
+    '⑤ 宽高比和前台窗口客户区一致（是裁过的，不是整屏）',
     ratioDiff < 0.12,
     `图 ${shotRatio.toFixed(2)} vs 窗口 ${winRatio.toFixed(2)}`,
   )
