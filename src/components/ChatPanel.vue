@@ -98,14 +98,28 @@ onMounted(() => {
    *
    * 面板是**每次打开都重新挂载**的（父组件用 v-if 控制），而气泡只是组件内的局部状态 ——
    * 以前的表现就是"每次打开对话都是空的"，即使会话本身还留着上下文。
-   * 会话是模块级单例、而且启动时已经从 localStorage 恢复了历史（见 session.ts），
-   * 所以这里读一次就能把上次聊的铺回来。
+   *
+   * 这里走 `hydrate()` 而不是直接读 `chatSession.messages`：本地那份存在
+   * localStorage，而它**按 origin 隔离** —— 浏览器（http://localhost:5176）和
+   * 桌面窗口是两个 origin，各存各的，于是「浏览器里聊过的，桌面打开看不到」。
+   *
+   * hydrate() 以**服务端转录**为准（谁连上来都是同一份），服务连不上才退回本地。
    */
-  const existing = chatSession.messages.filter((m) => m.role !== 'system')
-  if (existing.length) {
-    bubbles.value = existing.map((m) => ({ role: m.role as 'user' | 'assistant', text: m.content }))
-    scrollToBottom()
-  }
+  void (async () => {
+    try {
+      const history = await chatSession.hydrate()
+      const visible = history.filter((m) => m.role !== 'system')
+      if (!visible.length) return
+      bubbles.value = visible.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        text: m.content,
+      }))
+      scrollToBottom()
+    } catch (err) {
+      // 恢复失败不该影响能不能聊
+      console.warn('[chat] 恢复历史失败', err)
+    }
+  })()
 
   unsubscribeStatus = subscribeVoiceStatus((status, detail) => {
     voiceStatus.value = status

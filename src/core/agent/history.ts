@@ -59,3 +59,48 @@ export function clearHistory(): void {
     // 清不掉也没关系（下次 saveHistory 会覆盖）
   }
 }
+
+/**
+ * 从 agent 的转录（jsonl）里取历史。
+ *
+ * ★ 为什么必须走服务端
+ *
+ * localStorage 是**按 origin 隔离**的 —— 浏览器（http://localhost:5176）
+ * 和桌面窗口是两个 origin（打包版更是 file://），各存各的历史。
+ * 于是「浏览器里聊过的，桌面打开看不到」，看着像功能没做，
+ * 其实是存储位置选错了：转录在服务端，谁连上来都是同一份。
+ *
+ * 返回 `null` 表示「没拿到」（服务没起 / 超时 / 格式不对）——
+ * **和「拿到了但是空的」是两回事**：前者调用方该退回本地那份，
+ * 后者说明确实还没聊过，不该拿本地的旧数据去填。
+ */
+export async function loadHistoryFromAgent(
+  url: string,
+  sessionId: string,
+  turns = 100,
+): Promise<ChatMessage[] | null> {
+  try {
+    const base = url.replace(/\/+$/, '')
+    const query = `sessionId=${encodeURIComponent(sessionId)}&turns=${turns}`
+    const resp = await fetch(`${base}/history?${query}`, {
+      // 历史读不出来不该让对话开不了口，超时给短一点
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!resp.ok) return null
+
+    const data = (await resp.json()) as { messages?: unknown }
+    if (!Array.isArray(data.messages)) return null
+
+    return data.messages
+      .filter(
+        (m): m is ChatMessage =>
+          Boolean(m) &&
+          typeof (m as ChatMessage).content === 'string' &&
+          ((m as ChatMessage).role === 'user' || (m as ChatMessage).role === 'assistant'),
+      )
+      .map((m) => ({ role: m.role, content: m.content }))
+  } catch {
+    // 服务没起 / 超时 / 解析失败 —— 一律当「没拿到」，让调用方退回本地
+    return null
+  }
+}

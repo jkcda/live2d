@@ -29,7 +29,7 @@ import {
 } from '../services/agent.js'
 import { compactHistory, loadCompaction } from '../services/compaction.js'
 import { clearMemory, afterTurn, distillNow, forgetEntry, memoryStatus } from '../services/memory.js'
-import { appendTurn, clearTranscript } from '../services/transcript.js'
+import { appendTurn, clearTranscript, readRecentTurns } from '../services/transcript.js'
 import { getMcpStatus, mcpToolCounts } from '../services/mcp.js'
 
 export const chatRouter = Router()
@@ -163,5 +163,36 @@ chatRouter.get('/tools', (_req, res) => {
     // 从工具定义里取，不是手写列表 —— 手写的加了工具会忘
     builtin: builtinToolNames(),
     mcp: { ...mcp, counts: mcpToolCounts() },
+  })
+})
+
+/**
+ * 取服务端保存的对话历史。
+ *
+ * ★ 为什么需要这个接口
+ *
+ * 前端的对话历史存在 `localStorage`，而 localStorage 是**按 origin 隔离**的：
+ * 浏览器（http://localhost:5176）和桌面窗口是两个 origin，各存各的。
+ * 于是「浏览器里聊过的，桌面打开看不到」—— 看着像功能没做，其实是存储位置选错了。
+ *
+ * 转录（jsonl）在服务端，**谁连上来都是同一份**。这里把它暴露出来，
+ * 让 UI 有个跨端一致的来源。localStorage 退化成「服务端连不上时的兜底」。
+ *
+ * 顺带：转录是只追加的，所以它天然就是「全量保留」的那份 ——
+ * 而 UI 显示的条数和喂给模型的窗口长度是两件事，这里给的是前者。
+ */
+chatRouter.get('/history', (req, res) => {
+  const sessionId = String(req.query.sessionId || 'default').slice(0, 60)
+
+  // 上限兜一下：转录可能几万行，一次全吐出去会把前端和网络都拖住
+  const raw = Number(req.query.turns)
+  const turns = Number.isFinite(raw) ? Math.min(500, Math.max(1, Math.trunc(raw))) : 100
+
+  const records = readRecentTurns(sessionId, turns)
+  res.json({
+    sessionId,
+    /** 实际返回了几轮（一问一答算一轮） */
+    turns: Math.ceil(records.length / 2),
+    messages: records.map((r) => ({ role: r.role, content: r.text })),
   })
 })

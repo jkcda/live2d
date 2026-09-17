@@ -11,7 +11,7 @@
  */
 import { createSentenceSplitter, streamChat } from './llm'
 import { agentLikelyUp, markAgentDown, streamAgent } from './agentClient'
-import { clearHistory, loadHistory, saveHistory } from './history'
+import { clearHistory, loadHistory, loadHistoryFromAgent, saveHistory } from './history'
 import { buildSystemPrompt, DEFAULT_PERSONA, type Persona } from './persona'
 import type { AgentEvent, ChatMessage, LLMConfig } from './types'
 
@@ -73,6 +73,8 @@ export class ChatSession {
 
   private history: ChatMessage[] = []
   private controller: AbortController | null = null
+  /** 是否已经向服务端要过历史（hydrate 只该跑一次） */
+  private hydrated = false
 
   constructor(opts: SessionOptions) {
     this.cfg = opts.cfg
@@ -103,6 +105,41 @@ export class ChatSession {
   /** 当前是不是走 agent 服务（设置面板显示状态用） */
   get usingAgent(): boolean {
     return Boolean(this.agent?.enabled)
+  }
+
+  /**
+   * 从服务端补历史（启动时调一次，重复调用是空操作）。
+   *
+   * ★ 解决的是什么
+   *
+   * 本地那份存在 `localStorage`，而它**按 origin 隔离** ——
+   * 浏览器和桌面窗口是两个 origin，各存各的，于是「浏览器里聊过的桌面看不到」。
+   * 转录在服务端，谁连上来都是同一份。
+   *
+   * 拿不到（服务没起 / 超时）就保持本地那份 —— 服务挂了不该让对话开不了口。
+   *
+   * 返回最终生效的历史，调用方直接拿去铺 UI。
+   */
+  async hydrate(): Promise<ChatMessage[]> {
+    if (this.hydrated) return this.history
+    this.hydrated = true
+
+    const agent = this.agent
+    if (!agent?.enabled) return this.history
+
+    const remote = await loadHistoryFromAgent(agent.url, agent.sessionId ?? 'default')
+
+    /*
+     * null 和 [] 要分开处理：
+     *   null → 没拿到（服务没起），保持本地那份
+     *   []   → 服务端确实还没聊过，**不该**拿本地旧数据去填 ——
+     *          否则「在另一台机器上清空了历史」会被本地缓存悄悄复活
+     */
+    if (remote === null) return this.history
+
+    this.history = remote
+    if (remote.length) saveHistory(this.history)
+    return this.history
   }
 
   /** 是否正在生成 */
