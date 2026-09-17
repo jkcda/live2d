@@ -17,6 +17,18 @@ contextBridge.exposeInMainWorld('nexus', {
   quit: () => ipcRenderer.invoke('app:quit'),
 
   /**
+   * 当前前台窗口快照。
+   *
+   * 返回 null 表示：没在观察 / 已暂停 / 命中黑名单 / 读不到。
+   * 黑名单的过滤在主进程完成 —— 敏感标题根本不会走到这里。
+   */
+  getActivity: () => ipcRenderer.invoke('window:getActivity'),
+
+  /** 暂停 / 恢复观察 */
+  setObservePaused: (paused: boolean) => ipcRenderer.invoke('observe:setPaused', paused),
+  observeStatus: () => ipcRenderer.invoke('observe:status'),
+
+  /**
    * 订阅「托盘菜单要求打开某个面板」。
    * 返回取消订阅函数 —— 组件卸载时不注销会在热更新后重复触发。
    */

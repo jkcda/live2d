@@ -29,8 +29,28 @@ export interface AgentCommand {
   args: Record<string, unknown>
 }
 
+/**
+ * 当前前台窗口快照。
+ *
+ * 由前端在发请求前向 Electron 主进程取一次带上 —— **已经过黑名单过滤**，
+ * 拿到它就说明这个窗口是可以看的。服务端不做二次过滤：
+ * 过滤必须在数据产生的地方做（主进程），事后过滤不算数。
+ */
+export interface ActivitySnapshot {
+  /** 进程名，如 Code.exe */
+  process: string
+  /** 窗口标题 */
+  title: string
+  /** 这个活动开始的时刻（epoch ms） */
+  since: number
+  /** 已经持续了多少秒 */
+  forSeconds: number
+}
+
 export interface AgentContext {
   commands: AgentCommand[]
+  /** 这一轮请求带过来的前台窗口快照；没带就是 null */
+  activity: ActivitySnapshot | null
 }
 
 // ── 工具结果缓存（只缓存又慢又稳定的） ──
@@ -122,6 +142,38 @@ function createTools(ctx: AgentContext) {
     ),
   )
 
+  // 他此刻在干嘛（前台窗口）
+  tools.push(
+    tool(
+      async () => {
+        const a = ctx.activity
+        if (!a) {
+          return (
+            '看不到 —— 可能没在观察、被暂停了，或者当前窗口命中了屏蔽规则。' +
+            '这种情况别追问「你在干嘛」，正常聊就行。'
+          )
+        }
+        return JSON.stringify({
+          process: a.process,
+          title: a.title,
+          forMinutes: Math.max(1, Math.round(a.forSeconds / 60)),
+          _note:
+            'title 是窗口标题原文，里面可能混着文件名、网页标题、未读计数之类的噪声。' +
+            '别把它整条念出来，用你自己的话概括他在做什么就行。',
+        })
+      },
+      {
+        name: 'what_is_user_doing',
+        description:
+          '看一眼他此刻在用电脑干什么（当前前台窗口的进程和标题）。' +
+          '当他说「这个」「那个」「我刚才」「我在忙」但你不清楚指什么时用；' +
+          '或者你想主动关心他（「还在忙吗」「弄完了没」）时也可以用。' +
+          '但别每轮都看 —— 没有明确必要就别调，会显得很吵。',
+        schema: z.object({}),
+      },
+    ),
+  )
+
   // 主动记住
   tools.push(
     tool(
@@ -184,6 +236,19 @@ function createTools(ctx: AgentContext) {
   return tools
 }
 
+/**
+ * 内置工具名清单（给 GET /tools 用）。
+ *
+ * 从实际的工具定义里取，**不要手写列表** —— 手写的那种加了工具就会忘，
+ * 而且表现是「设置面板里少一个」，不报错、很难发现。
+ */
+export function builtinToolNames(): string[] {
+  const stub: AgentContext = { commands: [], activity: null }
+  return createTools(stub)
+    .map((t) => (t as { name?: string }).name)
+    .filter((n): n is string => Boolean(n))
+}
+
 // ── 人设 & 意图 ──
 
 /** 基础人设。应用可以整段覆盖（见 chat 路由的 systemPrompt 参数） */
@@ -216,6 +281,9 @@ function detectIntent(input: string): string | undefined {
     return 'search_web'
   if (/(几点|几号|周几|星期几|什么时候了)/.test(t)) return 'get_time'
   if (/(记住|别忘了|以后.*(记得|注意))/.test(t)) return 'remember'
+  // 「我在干嘛」这类 —— 不强制的话模型会直接瞎猜，而不是去看一眼
+  if (/(我在(干嘛|干什么|做什么|忙什么)|你知道我在|看看我在|猜猜我在)/.test(t))
+    return 'what_is_user_doing'
   return undefined
 }
 

@@ -25,6 +25,23 @@ export interface AgentServiceConfig {
   sessionId?: string
 }
 
+/**
+ * 取一次当前前台窗口快照。
+ *
+ * 放在发请求前取，而不是搞常驻推送通道 —— 一次 IPC 往返几毫秒，
+ * 而且拿到的一定是最新的。
+ *
+ * **永远不抛**：她「看得见」是锦上添花，不能因为它把整轮对话搞挂。
+ * 拿不到就是 null，服务端当「不知道」处理。
+ */
+async function currentActivity(): Promise<ActivitySnapshot | null> {
+  try {
+    return (await window.nexus?.getActivity()) ?? null
+  } catch {
+    return null
+  }
+}
+
 export interface SessionOptions {
   cfg: LLMConfig
   persona?: Persona
@@ -187,6 +204,7 @@ export class ChatSession {
           llm: this.cfg,
           systemPrompt: this.system,
           sessionId: agentCfg.sessionId,
+          activity: await currentActivity(),
           signal,
         })) {
           yield ev

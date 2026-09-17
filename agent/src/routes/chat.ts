@@ -20,7 +20,13 @@
 
 import { Router, type Request, type Response } from 'express'
 import { resolveLLM, type LLMOverride } from '../config.js'
-import { runAgent, type AgentContext, type ChatMessage } from '../services/agent.js'
+import {
+  builtinToolNames,
+  runAgent,
+  type ActivitySnapshot,
+  type AgentContext,
+  type ChatMessage,
+} from '../services/agent.js'
 import { compactHistory, loadCompaction } from '../services/compaction.js'
 import { clearMemory, afterTurn, distillNow, forgetEntry, memoryStatus } from '../services/memory.js'
 import { appendTurn, clearTranscript } from '../services/transcript.js'
@@ -34,6 +40,8 @@ interface ChatBody {
   llm?: LLMOverride
   systemPrompt?: string
   sessionId?: string
+  /** 当前前台窗口快照。前端发请求前向 Electron 主进程取一次带上（已过黑名单） */
+  activity?: ActivitySnapshot | null
 }
 
 chatRouter.post('/chat', async (req: Request, res: Response) => {
@@ -75,7 +83,7 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   const abort = new AbortController()
   req.on('close', () => abort.abort())
 
-  const ctx: AgentContext = { commands: [] }
+  const ctx: AgentContext = { commands: [], activity: body.activity ?? null }
   let assistantText = ''
 
   try {
@@ -152,7 +160,8 @@ chatRouter.post('/memory/clear', (req, res) => {
 chatRouter.get('/tools', (_req, res) => {
   const mcp = getMcpStatus()
   res.json({
-    builtin: ['search_web', 'get_time', 'remember', 'show_expression', 'respond'],
+    // 从工具定义里取，不是手写列表 —— 手写的加了工具会忘
+    builtin: builtinToolNames(),
     mcp: { ...mcp, counts: mcpToolCounts() },
   })
 })

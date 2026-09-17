@@ -29,6 +29,13 @@ export interface AgentStreamOptions {
   /** 应用自己那套人设（persona.ts） */
   systemPrompt?: string
   sessionId?: string
+  /**
+   * 当前前台窗口快照（她「看得见」的依据）。
+   *
+   * 由调用方在发请求前向主进程取一次，随请求带上 —— 不搞常驻推送通道。
+   * 取不到（没在观察 / 已暂停 / 命中黑名单）就是 undefined，服务端当「不知道」处理。
+   */
+  activity?: ActivitySnapshot | null
   signal?: AbortSignal
 }
 
@@ -60,6 +67,7 @@ export async function* streamAgent(opts: AgentStreamOptions): AsyncGenerator<Age
       llm: opts.llm,
       systemPrompt: opts.systemPrompt,
       sessionId: opts.sessionId,
+      activity: opts.activity ?? null,
     }),
     signal: opts.signal,
   })

@@ -12,6 +12,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // node16 模块解析要求显式扩展名 —— 写 .js，即使源文件是 .ts
 import { isSupported as nativeStyleSupported, setNoActivate } from './win-style.js'
+import { ActivityObserver, activitySnapshot } from './observer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -27,6 +28,14 @@ let panelOpen = false
 
 /** koffi 是否可用。不可用时退回 Electron 的 focusable 方案（会有抢焦点问题，但至少能用） */
 const hasNativeStyle = nativeStyleSupported()
+
+/**
+ * 前台窗口观察器。
+ *
+ * 隐私边界在它内部：黑名单命中的窗口连标题都不记录（见 observer.ts）。
+ * 这里只负责生命周期和对外暴露快照。
+ */
+const observer = new ActivityObserver()
 
 /**
  * 取静态资源的绝对路径。
@@ -166,6 +175,17 @@ function refreshTrayMenu() {
       { label: '和她说话…', click: () => openPanel('chat') },
       { label: '设置…', click: () => openPanel('settings') },
       { type: 'separator' },
+      {
+        // 观察开关放托盘而不是只放设置面板：这是隐私相关的开关，
+        // 用户想关的时候应该一步就能关到，而不是翻两层菜单。
+        label: observer.paused ? '恢复观察' : '暂停观察',
+        enabled: observer.available,
+        click: () => {
+          observer.setPaused(!observer.paused)
+          refreshTrayMenu()
+        },
+      },
+      { type: 'separator' },
       { label: `v${app.getVersion()}`, enabled: false },
       { label: '退出', click: () => app.quit() },
     ]),
@@ -235,6 +255,26 @@ ipcMain.handle('window:hide', () => {
 
 ipcMain.handle('app:version', () => app.getVersion())
 
+/**
+ * 取当前前台窗口快照。
+ *
+ * 渲染层在发对话请求前调这个，把结果一起带给 agent ——
+ * 这样「她看得见你在干嘛」不需要一条常驻推送通道。
+ * 返回 null 表示：没在观察 / 已暂停 / 命中黑名单 / 读不到。
+ */
+ipcMain.handle('window:getActivity', () => activitySnapshot(observer))
+
+ipcMain.handle('observe:setPaused', (_e, paused: boolean) => {
+  observer.setPaused(paused)
+  refreshTrayMenu()
+  return observer.paused
+})
+
+ipcMain.handle('observe:status', () => ({
+  available: observer.available,
+  paused: observer.paused,
+}))
+
 ipcMain.handle('app:quit', () => {
   app.quit()
 })
@@ -268,10 +308,18 @@ app.whenReady().then(() => {
     app.quit()
   })
 
+  if (observer.available) {
+    observer.start()
+    console.log('[main] 前台窗口观察已启动（默认开启；托盘菜单可暂停）')
+  } else {
+    console.warn('[main] 前台窗口观察不可用（非 Windows 或 koffi 加载失败）')
+  }
+
   console.log('[main] 快捷键：Ctrl+Shift+H 显隐角色，Ctrl+Shift+Q 退出')
 })
 
 app.on('will-quit', () => {
+  observer.stop()
   globalShortcut.unregisterAll()
   tray?.destroy()
   tray = null
