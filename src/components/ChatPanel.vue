@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { marked } from 'marked'
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
   bargeIn,
@@ -54,6 +55,22 @@ function toolSummary(args: Record<string, unknown>): string {
   if (text) return text.length > 36 ? `${text.slice(0, 36)}…` : text
   const first = Object.values(args).find((v) => typeof v === 'string')
   return typeof first === 'string' ? (first.length > 36 ? `${first.slice(0, 36)}…` : first) : ''
+}
+
+/**
+ * Markdown 渲染 —— 和 nexus 前端同一套（`marked` 的 `breaks: true`）。
+ *
+ * ★ 为什么必须渲染 markdown 而不是直接显示纯文本：
+ *   模型的回复本来就是 markdown，段落之间是 `\n\n`。
+ *   纯文本 + `white-space: pre-wrap` 会把它原样变成**一个空行** ——
+ *   看起来像"莫名多了一行"，而 markdown 渲染会把它变成正常的段间距（有 margin），
+ *   观感是完全不同的两件事。同一个 `\n\n`，一个像 bug，一个像排版。
+ *
+ * `breaks: true` 是关键：单个换行也当换行（否则模型爱用的"每句一行"会挤成一坨）。
+ */
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  return marked.parse(text, { breaks: true }) as string
 }
 
 const bubbles = ref<Bubble[]>([])
@@ -266,7 +283,8 @@ function onKeydown(e: KeyboardEvent) {
         </div>
         <div class="bubble" :class="{ failed: b.failed }">
           <span v-if="!b.text" class="typing">…</span>
-          <template v-else>{{ b.text }}</template>
+          <!-- eslint-disable-next-line vue/no-v-html —— 内容来自本地 LLM，和 nexus 前端同一套渲染 -->
+          <div v-else class="msg-content" v-html="renderMarkdown(b.text)" />
         </div>
       </div>
 
@@ -391,8 +409,66 @@ function onKeydown(e: KeyboardEvent) {
   border-radius: 10px;
   font-size: 13px;
   line-height: 1.6;
-  white-space: pre-wrap;
+  /*
+   * ★ markdown 渲染之后这里**必须**是 normal：
+   *   `pre-wrap` 会把 markdown 生成的 <p> 之间那些换行也画出来 ——
+   *   于是段间距被算两遍（markdown 的 margin + 源码里的空行），
+   *   表现就是"隔开一行"。占位符「…」用 inline 元素渲染，不受影响。
+   */
+  white-space: normal;
   word-break: break-word;
+}
+
+/* markdown 输出的排版：段落紧凑一点，代码块有底色 */
+.msg-content > :first-child {
+  margin-top: 0;
+}
+
+.msg-content > :last-child {
+  margin-bottom: 0;
+}
+
+.msg-content p {
+  margin: 0 0 6px;
+}
+
+.msg-content ul,
+.msg-content ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.msg-content li {
+  margin: 2px 0;
+}
+
+.msg-content code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+}
+
+.msg-content pre {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow-x: auto;
+}
+
+.msg-content pre code {
+  padding: 0;
+  background: none;
+}
+
+.msg-content a {
+  color: #8ab4f8;
+}
+
+.msg-content strong {
+  color: #f0f0f4;
 }
 
 .row.assistant .bubble {
