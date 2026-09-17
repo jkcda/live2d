@@ -26,20 +26,23 @@ export interface WebSearchResult {
   sources: SearchSource[]
 }
 
-/** 去掉口气词、补时间限定 —— 中文口语直接搜命中率很低 */
+/** 去掉口气词、问句壳子 —— 中文口语直接搜命中率很低 */
 export function optimizeQuery(query: string): string {
-  let q = query
+  const q = query
     .replace(/[✦◆]/g, '')
     .replace(/请[帮]?我/g, '')
     .trim()
 
-  const timeWords = ['今天', '最新', '最近', '现在', '当前', '今年', '今日', '近日', '近期', '刚刚']
-  if (timeWords.some((w) => q.includes(w))) {
-    const now = new Date()
-    const ym = `${now.getFullYear()}年${now.getMonth() + 1}月`
-    if (!q.includes(String(now.getFullYear()))) q = `${ym} ${q}`
-  }
-
+  /*
+   * ★ 这里**故意不做**"给带时间词的查询加当前年月前缀"。
+   *
+   * 那是我从 nexus 的 webSearch.ts 搬来的，但在实测里它是**有害**的：
+   * 查「原神 最新版本」被改写成「2026年9月 原神 最新版本」，
+   * Bing 于是返回一堆「2026年日历/放假安排」——年份把查询带偏了。
+   * 时间限定对"新闻/价格"确实有用，但判断该不该加需要语义理解，
+   * 靠一个"句子里有没有'最新'"的正则做不到 —— 结果就是帮倒忙。
+   * 宁可让搜索引擎自己理解，也不要加错限定。
+   */
   return (
     q
       .replace(/^什么是/, '')
@@ -103,23 +106,67 @@ async function searchDuckDuckGo(query: string): Promise<SearchSource[]> {
   }))
 }
 
+/**
+ * Bing 抓 HTML —— 国内可用的兜底。
+ *
+ * ★ 为什么要它：DuckDuckGo 在国内**直接连不上**（实测 fetch failed，10 秒超时、0 条），
+ *   而 Tavily 要用户先去注册一个 key —— 一个陪伴型桌宠，"她能不能上网"
+ *   不该卡在"先去注册一个搜索服务"上。cn.bing.com 国内可达，且不需要 key。
+ */
+async function searchBing(query: string): Promise<SearchSource[]> {
+  const resp = await fetch(`https://cn.bing.com/search?q=${encodeURIComponent(query)}&setlang=zh-CN`, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+      'Accept-Language': 'zh-CN,zh;q=0.9',
+    },
+    signal: AbortSignal.timeout(15_000),
+  })
+  const html = await resp.text()
+
+  // 结果块：<li class="b_algo"><h2><a href="URL">标题</a></h2> … <p>摘要</p>
+  const clean = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').trim()
+  const out: SearchSource[] = []
+  for (const block of html.split(/<li class="b_algo"/).slice(1)) {
+    const link = block.match(/<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/)
+    if (!link) continue
+    const snippet = block.match(/<p[^>]*>([\s\S]*?)<\/p>/)
+    out.push({ title: clean(link[2]), url: link[1], snippet: snippet ? clean(snippet[1]) : '' })
+    if (out.length >= WEB_SEARCH.maxResults) break
+  }
+  return out
+}
+
 export async function searchWeb(query: string): Promise<WebSearchResult> {
   const empty: WebSearchResult = { text: '', sources: [] }
   if (!WEB_SEARCH.enabled) return empty
 
   const q = optimizeQuery(query)
-  try {
-    const results = WEB_SEARCH.tavilyKey ? await searchTavily(q) : await searchDuckDuckGo(q)
-    if (!results.length) return empty
+  /*
+   * 三级兜底，按"用户要付多少代价"排：
+   *   Tavily（要 key，最准）→ Bing 抓 HTML（国内可达，不要 key）→ DuckDuckGo（国外可用）
+   * 前一级失败或空结果就试下一级 —— 任何一级挂掉都不该让"联网"这个能力整体消失。
+   */
+  const attempts: Array<[string, () => Promise<SearchSource[]>]> = []
+  if (WEB_SEARCH.tavilyKey) attempts.push(['Tavily', () => searchTavily(q)])
+  attempts.push(['Bing', () => searchBing(q)], ['DuckDuckGo', () => searchDuckDuckGo(q)])
 
-    const text =
-      `\n--- 以下是刚查到的东西 ---\n` +
-      results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`).join('\n\n') +
-      `\n--- 结束 ---\n`
-
-    return { text, sources: results }
-  } catch (err) {
-    console.warn('[search] 失败：', err instanceof Error ? err.message : err)
-    return empty
+  for (const [name, run] of attempts) {
+    try {
+      const results = await run()
+      if (!results.length) {
+        console.log(`[search] ${name} 没有结果，试下一个`)
+        continue
+      }
+      const text =
+        `\n--- 以下是刚查到的东西（来源：${name}）---\n` +
+        results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`).join('\n\n') +
+        `\n--- 结束 ---\n`
+      console.log(`[search] ${name} 拿到 ${results.length} 条`)
+      return { text, sources: results }
+    } catch (err) {
+      console.warn(`[search] ${name} 失败：`, err instanceof Error ? err.message : err)
+    }
   }
+  return empty
 }
