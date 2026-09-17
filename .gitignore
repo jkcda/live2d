@@ -68,3 +68,7 @@ Thumbs.db
 # 试听/调试产物
 *.wav
 !python/voices/README.md
+
+# Playwright MCP 把网页快照写到这（运行时产物，不入库）
+.playwright-mcp/
+agent/.playwright-mcp/
