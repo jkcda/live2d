@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IDLE_LABELS,
   LLM_PRESETS,
+  loadAgentConfig,
   loadIdleActivity,
   loadLLMConfig,
   loadTTSConfig,
@@ -137,6 +138,10 @@ onMounted(() => {
 
   // 音色列表：服务可能还没起来，读不到就只是没有下拉可选（不影响其它设置）
   void loadVoices()
+
+  // 记忆：agent 服务可能没起，读不到就显示提示（这一栏本身要能说明"为什么是空的"）
+  agentURL.value = loadAgentConfig().url
+  void loadMemoryPanel()
 })
 
 /*
@@ -372,6 +377,127 @@ async function addVoice() {
     voiceBusy.value = false
   }
 }
+
+// ---------------------------------------------------------------- 她记得什么
+
+/**
+ * 记忆面板。
+ *
+ * 为什么要做进界面：记忆以前是"只会写文件、界面完全看不见" ——
+ * 用户没法判断她到底记没记住。实测撞到过最坏的那种：记忆文件是空的，
+ * 而界面一切正常，用户的结论只能是"记忆好像是假的"。
+ * 现在后端把状态都暴露了（entries / lastError / 上次整理 / 转录条数），
+ * 这一栏就是把它们显示出来，并且能删、能手动整理。
+ */
+const agentURL = ref('')
+const memEntries = ref<string[]>([])
+const memBusy = ref(false)
+const memMsg = ref('')
+const memStatus = ref<{
+  lastDistillAt: number
+  lastError: string
+  distillEvery: number
+  transcriptTurns: number
+  turnsSinceDistill: number
+} | null>(null)
+
+/** 上次整理时间的可读表示（0 = 从没整理过） */
+const lastDistillText = computed(() => {
+  const t = memStatus.value?.lastDistillAt ?? 0
+  if (!t) return '还没整理过'
+  const sec = Math.round((Date.now() - t) / 1000)
+  if (sec < 60) return `${sec} 秒前`
+  if (sec < 3600) return `${Math.round(sec / 60)} 分钟前`
+  return `${Math.round(sec / 3600)} 小时前`
+})
+
+function memBase(): string {
+  return agentURL.value.replace(/\/+$/, '')
+}
+
+function applyMem(data: Record<string, unknown>): void {
+  memEntries.value = (data.entries as string[]) ?? []
+  memStatus.value = {
+    lastDistillAt: Number(data.lastDistillAt ?? 0),
+    lastError: String(data.lastError ?? ''),
+    distillEvery: Number(data.distillEvery ?? 4),
+    transcriptTurns: Number(data.transcriptTurns ?? 0),
+    turnsSinceDistill: Number(data.turnsSinceDistill ?? 0),
+  }
+}
+
+async function loadMemoryPanel(): Promise<void> {
+  if (!memBase()) return
+  try {
+    const resp = await fetch(`${memBase()}/memory`, { signal: AbortSignal.timeout(8000) })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    applyMem((await resp.json()) as Record<string, unknown>)
+    memMsg.value = ''
+  } catch (err) {
+    memMsg.value = `读不到记忆（agent 服务没起？）：${err instanceof Error ? err.message : err}`
+  }
+}
+
+/** 忘掉一条 */
+async function forgetOne(index: number): Promise<void> {
+  try {
+    const resp = await fetch(`${memBase()}/memory/${index}`, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    applyMem((await resp.json()) as Record<string, unknown>)
+    memMsg.value = '忘掉了'
+  } catch (err) {
+    memMsg.value = `删除失败：${err instanceof Error ? err.message : err}`
+  }
+}
+
+/** 立即整理（不想等那 4 轮）。把应用里那套 LLM 配置一起发过去 —— 服务端不存 key */
+async function distillNow(): Promise<void> {
+  memBusy.value = true
+  memMsg.value = '整理中（要调一次模型，几秒）…'
+  try {
+    persistNow()
+    const llm = loadLLMConfig()
+    const resp = await fetch(`${memBase()}/memory/distill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        llm: { baseURL: llm.baseURL, apiKey: llm.apiKey, model: llm.model },
+        sessionId: loadAgentConfig().sessionId,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    })
+    const data = (await resp.json()) as Record<string, unknown>
+    applyMem(data)
+    memMsg.value = data.updated ? '已更新' : memStatus.value?.lastError ? '没成功（见下方错误）' : '没有需要更新的'
+  } catch (err) {
+    memMsg.value = `整理失败：${err instanceof Error ? err.message : err}`
+  } finally {
+    memBusy.value = false
+  }
+}
+
+/** 全部忘掉（连转录一起清 —— 否则下次整理又从转录里把它捞回来） */
+async function forgetAll(): Promise<void> {
+  if (!window.confirm('让她忘掉所有记住的事？（对话转录也会一起清掉）')) return
+  memBusy.value = true
+  try {
+    const resp = await fetch(`${memBase()}/memory/clear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: loadAgentConfig().sessionId }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    applyMem((await resp.json()) as Record<string, unknown>)
+    memMsg.value = '已经忘了'
+  } catch (err) {
+    memMsg.value = `失败：${err instanceof Error ? err.message : err}`
+  } finally {
+    memBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -536,6 +662,43 @@ async function addVoice() {
             <span class="hint">{{ voiceMsg }}</span>
           </div>
         </template>
+      </section>
+
+      <!--
+        她记得什么：逐条显示 + 单条删除 + 立即整理 + 状态。
+        为什么需要"状态"那一行：记忆最容易出的问题是**静默失败** ——
+        文件是空的、界面一切正常，用户只能得出"记忆好像是假的"这个结论。
+        -->
+      <section>
+        <h3>她记得什么</h3>
+        <p class="note">
+          她自己整理：每 {{ memStatus?.distillEvery ?? 4 }} 轮从对话转录里提炼一次
+          （{{ memMsg || '也可以现在手动整理' }}）。记错了就右边删掉 ——
+          没记的事她不会假装记得。
+        </p>
+
+        <p v-if="!memEntries.length" class="hint">还没有记住任何事（多聊几句，或者点「立即整理」）。</p>
+        <div v-else class="mem-list">
+          <div v-for="(entry, i) in memEntries" :key="i" class="mem-item">
+            <span class="mem-text">{{ entry }}</span>
+            <button class="btn small" @click="forgetOne(i)">忘掉</button>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn" :disabled="memBusy" @click="distillNow">
+            {{ memBusy ? '整理中…' : '立即整理' }}
+          </button>
+          <button class="btn" :disabled="memBusy || !memEntries.length" @click="forgetAll">
+            全部忘掉
+          </button>
+          <button class="btn" :disabled="memBusy" @click="loadMemoryPanel">刷新</button>
+        </div>
+
+        <p v-if="memStatus" class="note">
+          转录 {{ memStatus.transcriptTurns }} 轮｜上次整理：{{ lastDistillText }}
+          <span v-if="memStatus.lastError" class="err">｜上次出错：{{ memStatus.lastError }}</span>
+        </p>
       </section>
     </div>
 
@@ -713,6 +876,38 @@ textarea {
 input[type='file'] {
   font-size: 11px;
   color: #a0a0aa;
+}
+
+/* 记忆列表：一条一行，右边一个「忘掉」 */
+.mem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.mem-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mem-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d8d8e0;
+  overflow-wrap: anywhere;
+}
+
+/* 出错要显眼：记忆静默失败是这套东西最坑的状态 */
+.err {
+  color: #e07878;
 }
 
 input:focus,

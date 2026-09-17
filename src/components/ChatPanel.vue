@@ -17,6 +17,43 @@ interface Bubble {
   role: 'user' | 'assistant'
   text: string
   failed?: boolean
+  /** 这一轮她调过哪些工具（对齐 nexus 面板的 chip：干活时用户得看得见） */
+  chips?: ToolChip[]
+}
+
+interface ToolChip {
+  label: string
+  summary: string
+  status: 'running' | 'done'
+}
+
+/**
+ * 工具名 → 人话。
+ *
+ * 为什么要映射：MCP 的工具名是 `playwright__browser_click` 这种，
+ * 直接显示出来用户只会看到一串英文标识符，等于没反馈。
+ * 内置工具用自己的说法，MCP 的剥掉前缀再美化。
+ */
+function toolLabel(tool: string): string {
+  const builtin: Record<string, string> = {
+    search_web: '联网查',
+    get_time: '看时间',
+    remember: '记下来',
+    show_expression: '换个表情',
+    respond: '说话',
+  }
+  if (builtin[tool]) return builtin[tool]
+  const bare = tool.includes('__') ? tool.split('__').slice(1).join('__') : tool
+  return bare.replace(/_/g, ' ')
+}
+
+/** 参数摘要：挑一个最能说明"她在干什么"的字段 */
+function toolSummary(args: Record<string, unknown>): string {
+  const pick = (k: string) => (typeof args[k] === 'string' ? (args[k] as string) : '')
+  const text = pick('query') || pick('text') || pick('content') || pick('url') || pick('command')
+  if (text) return text.length > 36 ? `${text.slice(0, 36)}…` : text
+  const first = Object.values(args).find((v) => typeof v === 'string')
+  return typeof first === 'string' ? (first.length > 36 ? `${first.slice(0, 36)}…` : first) : ''
 }
 
 const bubbles = ref<Bubble[]>([])
@@ -120,6 +157,28 @@ async function sendText(text: string) {
         // 必须经由数组下标写入才能触发响应式 —— 直接改局部变量对象不会更新视图
         bubbles.value[replyIndex].text += ev.content
         scrollToBottom()
+      } else if (ev.type === 'tool_call') {
+        /*
+         * 工具调用要**当场显示**：agent 干活可能要好几秒（联网、开浏览器），
+         * 这段时间界面如果不给任何反馈，用户看到的就是"她卡住了/她变笨了"。
+         */
+        const chip: ToolChip = {
+          label: toolLabel(ev.tool),
+          summary: toolSummary(ev.args),
+          status: 'running',
+        }
+        const cur = bubbles.value[replyIndex]
+        cur.chips = [...(cur.chips ?? []), chip]
+        scrollToBottom()
+      } else if (ev.type === 'tool_result') {
+        // 把最后一个"进行中"的 chip 标成完成（同一个工具可能被调多次）
+        const chips = bubbles.value[replyIndex].chips ?? []
+        for (let i = chips.length - 1; i >= 0; i--) {
+          if (chips[i].status === 'running') {
+            chips[i].status = 'done'
+            break
+          }
+        }
       } else if (ev.type === 'error') {
         error.value = ev.message
         bubbles.value[replyIndex].failed = true
@@ -192,6 +251,19 @@ function onKeydown(e: KeyboardEvent) {
       </p>
 
       <div v-for="(b, i) in bubbles" :key="i" class="row" :class="b.role">
+        <!-- 工具调用：干活的痕迹要露出来（她上网查/开浏览器时，这几秒不能是黑箱） -->
+        <div v-if="b.chips?.length" class="chips">
+          <span
+            v-for="(chip, ci) in b.chips"
+            :key="ci"
+            class="chip"
+            :class="chip.status"
+            :title="chip.summary"
+          >
+            <span class="chip-dot" />
+            {{ chip.label }}<template v-if="chip.summary">：{{ chip.summary }}</template>
+          </span>
+        </div>
         <div class="bubble" :class="{ failed: b.failed }">
           <span v-if="!b.text" class="typing">…</span>
           <template v-else>{{ b.text }}</template>
@@ -350,8 +422,7 @@ function onKeydown(e: KeyboardEvent) {
   background: rgba(160, 60, 60, 0.22);
   color: #e0a0a0;
   font-size: 12px;
-  line-height: 1.5;
-}
+  line-height: 1.5;}
 
 .foot {
   display: flex;
@@ -446,5 +517,53 @@ function onKeydown(e: KeyboardEvent) {
 
 .send.stop:hover {
   background: rgba(200, 80, 80, 0.85);
+}
+
+/* 工具调用 chip：她干活时露出来的痕迹（进行中会呼吸，完成后变暗） */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(90, 120, 200, 0.18);
+  border: 1px solid rgba(120, 150, 220, 0.28);
+  color: #b8c8e0;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip.done {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #8a8a94;
+}
+
+.chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #7aa2ff;
+  animation: chip-pulse 1.1s ease-in-out infinite;
+}
+
+.chip.done .chip-dot {
+  background: #5a5a66;
+  animation: none;
+}
+
+@keyframes chip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
 }
 </style>
