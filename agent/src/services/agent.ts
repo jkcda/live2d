@@ -293,6 +293,12 @@ export async function* runAgent(
 
   let contentEmitted = false
   let toolCalled = false
+  /**
+   * 当前是不是"一段内容的开头"。
+   * 工具调用前后各算一段 —— 每段开头都要去掉前导空白，
+   * 否则"调用工具那一轮吐的换行"会变成正文里的空行（见 on_chat_model_stream）。
+   */
+  let segmentStart = true
 
   try {
     const stream = await agent.streamEvents(
@@ -333,14 +339,29 @@ export async function* runAgent(
                 (raw as { content?: string })?.content ??
                 String(raw ?? ''))
           yield { type: 'tool_result', tool: event.name || 'unknown', result: String(text) }
+          // 工具之后的回答是新的一段，重新允许"去掉前导空白"
+          segmentStart = true
           break
         }
 
         case 'on_chat_model_stream': {
           const chunk = (event.data as { chunk?: { content?: unknown } })?.chunk?.content
           if (typeof chunk === 'string' && chunk) {
+            /*
+             * ★ 空白增量不算内容 —— 这是"回答中间莫名多一个换行"的根因。
+             *   模型在**工具调用那一轮**经常只吐一个 "\n"（或者回答以换行开头），
+             *   而 `chunk` 只要是 truthy 就会被当正文追加，气泡里于是凭空多一行。
+             *   规则：**一段内容的开头**去掉前导空白；已经开始之后就原样保留
+             *   （正文里的空行/缩进是模型真想表达的，不能一刀切）。
+             */
+            let text = chunk
+            if (segmentStart) {
+              text = text.replace(/^\s+/, '')
+              if (!text) break // 整块都是空白 → 丢掉，也别把它算作"已经有内容了"
+            }
+            segmentStart = false
             contentEmitted = true
-            yield { type: 'content', content: chunk }
+            yield { type: 'content', content: text }
           }
           break
         }
