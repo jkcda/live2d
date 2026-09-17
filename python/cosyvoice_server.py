@@ -202,6 +202,42 @@ def add_voice(req: VoiceRequest) -> dict:
 
     if len(raw) < 1000:
         raise HTTPException(status_code=400, detail="音频太短了（至少得有一两秒）")
+
+    # ★ 检查"音频长度"和"文字字数"是否匹配 —— 这是克隆最常见的失败方式，而且**是静默的**：
+    #   零样本克隆靠"参考音频 + 它逐字对应的文字"对齐音素。文字只写了开头几个字、
+    #   或者干脆写错，模型不会报错，它会**自己编** ——
+    #   表现是"合成的语音和要说的内容对不上"（实测：喂 13 个字吐出 10.4 秒音频，
+    #   正常只要 2.5~3.5 秒；用户就是这么被坑的，一个 7.3 秒的录音只写了 7 个字）。
+    #   所以这里按语速区间卡一道：中文正常 4~6 字/秒，放宽到 3~8 字/秒。
+    try:
+        import io as _io
+        import wave as _wave
+
+        with _wave.open(_io.BytesIO(raw)) as w:
+            seconds = w.getnframes() / float(w.getframerate() or 1)
+    except Exception:  # noqa: BLE001 - 不是 wav 就跳过这道检查（模型那边会自己判）
+        seconds = 0.0
+
+    chars = len(req.text.strip())
+    if seconds > 1:
+        if chars < seconds * 3:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"文字和录音对不上：音频 {seconds:.1f} 秒大约说 {int(seconds*4)}~{int(seconds*6)} 个字，"
+                    f"但只填了 {chars} 个字。请把录音里说的**整句话**逐字填上 —— "
+                    "只写一部分会让音色乱飘（模型会自己编内容）。"
+                ),
+            )
+        if chars > seconds * 8:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"文字比录音长太多：音频 {seconds:.1f} 秒最多约 {int(seconds*8)} 个字，"
+                    f"你填了 {chars} 个字。是不是填了别的内容？"
+                ),
+            )
+
     wav_path.write_bytes(raw)
     wav_path.with_suffix(".txt").write_text(req.text.strip(), encoding="utf-8")
 

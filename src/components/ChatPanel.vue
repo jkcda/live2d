@@ -39,6 +39,20 @@ let unsubscribeStatus: (() => void) | null = null
 onMounted(() => {
   inputEl.value?.focus()
 
+  /*
+   * ★ 把会话里已有的历史铺回气泡。
+   *
+   * 面板是**每次打开都重新挂载**的（父组件用 v-if 控制），而气泡只是组件内的局部状态 ——
+   * 以前的表现就是"每次打开对话都是空的"，即使会话本身还留着上下文。
+   * 会话是模块级单例、而且启动时已经从 localStorage 恢复了历史（见 session.ts），
+   * 所以这里读一次就能把上次聊的铺回来。
+   */
+  const existing = chatSession.messages.filter((m) => m.role !== 'system')
+  if (existing.length) {
+    bubbles.value = existing.map((m) => ({ role: m.role as 'user' | 'assistant', text: m.content }))
+    scrollToBottom()
+  }
+
   unsubscribeStatus = subscribeVoiceStatus((status, detail) => {
     voiceStatus.value = status
     if (status === 'error') error.value = detail ?? '语音输入出错'

@@ -11,6 +11,7 @@
  */
 import { createSentenceSplitter, streamChat } from './llm'
 import { agentLikelyUp, markAgentDown, streamAgent } from './agentClient'
+import { clearHistory, loadHistory, saveHistory } from './history'
 import { buildSystemPrompt, DEFAULT_PERSONA, type Persona } from './persona'
 import type { AgentEvent, ChatMessage, LLMConfig } from './types'
 
@@ -62,6 +63,13 @@ export class ChatSession {
     this.system = buildSystemPrompt(opts.persona ?? DEFAULT_PERSONA)
     this.hooks = { onSentence: opts.onSentence, onDelta: opts.onDelta, onEvent: opts.onEvent }
     this.maxHistory = opts.maxHistory ?? 40
+    /*
+     * ★ 恢复上次的对话历史。
+     *   这一行就是"每次打开对话都是空的"的解药 —— 以前 toJSON()/load() 写了却没人调，
+     *   刷新一次全丢。会话是模块级单例，只在这里恢复一次；面板重开时读 this.messages 即可。
+     */
+    this.history = loadHistory()
+    this.trim()
   }
 
   /** 热更新接口配置与人设（改设置后调用，无需重建实例） */
@@ -148,6 +156,12 @@ export class ChatSession {
         // 一个字都没吐且报错 —— 把这条用户消息撤回，避免污染上下文
         this.history.pop()
       }
+
+      /*
+       * 落盘放在 finally 里：**成功、报错、被用户打断**三种结局都要留下痕迹。
+       * 只写在成功路径上是个常见的坑 —— 用户打断一半再刷新，那一轮就凭空消失了。
+       */
+      saveHistory(this.history)
     }
   }
 
@@ -204,9 +218,16 @@ export class ChatSession {
   clear(): void {
     this.interrupt()
     this.history = []
+    // 落盘的那份也要清 —— 否则刷新一下，刚清掉的历史又全回来了
+    clearHistory()
   }
 
-  /** 导出，供持久化用 */
+  /**
+   * 导出，供持久化用。
+   *
+   * 注意：实际落盘走的是 history.ts 的 saveHistory（每次对话结束自动存），
+   * 这个方法是给外部（比如导出成文件）用的 —— 别再出现"写了却没人调"的情况。
+   */
   toJSON(): ChatMessage[] {
     return [...this.history]
   }
