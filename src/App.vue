@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, onMounted, ref, watch } from 'vue'
 import CharacterStage from './components/CharacterStage.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -74,6 +74,7 @@ watch(
 
 let unsubscribeOpenPanel: (() => void) | null = null
 let unsubscribeResetHover: (() => void) | null = null
+let unsubscribeExitPassthrough: (() => void) | null = null
 
 onMounted(async () => {
   if (window.nexus) {
@@ -81,6 +82,14 @@ onMounted(async () => {
 
     // 托盘菜单点了「和她说话…」/「设置…」时从这里进来
     unsubscribeOpenPanel = window.nexus.onOpenPanel((panel) => {
+      /*
+       * 面板打开前必须先退出穿透。
+       *
+       * 穿透态下**整个窗口**都在忽略鼠标，面板弹出来也是点不动的
+       * （模板里 showChat && !passthrough 那条也是为此）。
+       * 从托盘进来的用户正卡在「点了没反应」里，这里是他的一条退路。
+       */
+      exitPassthrough()
       if (panel === 'chat') {
         showChat.value = true
         showSettings.value = false
@@ -98,6 +107,9 @@ onMounted(async () => {
     unsubscribeResetHover = window.nexus.onResetHover(() => {
       void window.nexus?.setInteractive(!passthrough.value)
     })
+
+    // 托盘菜单里的「恢复交互（穿透中）」走这条
+    unsubscribeExitPassthrough = window.nexus.onExitPassthrough(() => exitPassthrough())
   }
 })
 
@@ -105,12 +117,60 @@ onUnmounted(() => {
   window.clearTimeout(hideTimer)
   unsubscribeOpenPanel?.()
   unsubscribeResetHover?.()
+  unsubscribeExitPassthrough?.()
 })
+
+/** 退出穿透。托盘和「打开面板」共用这一条，保证两边状态一致 */
+function exitPassthrough() {
+  if (!passthrough.value) return
+  passthrough.value = false
+  void window.nexus?.setInteractive(true)
+}
 
 /** 切换点击穿透：穿透后鼠标事件直接落到桌面上 */
 async function togglePassthrough() {
   passthrough.value = !passthrough.value
   await window.nexus?.setInteractive(!passthrough.value)
+}
+
+/**
+ * 把「穿透时还能点的那一小块」告诉主进程。
+ *
+ * ⚠️ 为什么判定必须在主进程：窗口一进入穿透，**页面就收不到任何鼠标事件了** ——
+ * 实测穿透态下 mousemove 数量是 0（同一坐标非穿透时正常收到），
+ * Electron 的 `setIgnoreMouseEvents(..., { forward: true })` 在这里并不送事件。
+ * 所以页面既不知道光标在哪，也就没法自己判断「鼠标压到提示条上了」。
+ * 主进程有 `screen.getCursorScreenPoint()`，不受窗口输入状态影响 —— 让它来盯。
+ */
+watch(passthrough, async (on) => {
+  if (!window.nexus) return
+  if (!on) {
+    await window.nexus.setPassthroughIsland(null)
+    return
+  }
+  /*
+   * 量两次：立刻量一次（穿透刚生效，马上就要能点），
+   * 进场动画结束后**再量一次**。
+   *
+   * 第二次不能省：提示条带着 translateY(6px) 的进场动画，动画期间量到的
+   * 位置和最终位置能差二十几像素 —— 主进程拿着这个偏掉的矩形去比光标，
+   * 结果就是「鼠标明明压在提示条上了，窗口还是不理你」。
+   */
+  await reportIsland()
+  window.setTimeout(() => void reportIsland(), 320)
+})
+
+async function reportIsland() {
+  for (let i = 0; i < 10; i++) {
+    await nextTick()
+    const el = document.querySelector('.passthrough-hint')
+    if (el) {
+      const r = el.getBoundingClientRect()
+      await window.nexus?.setPassthroughIsland({ x: r.x, y: r.y, width: r.width, height: r.height })
+      return
+    }
+    await new Promise((done) => setTimeout(done, 30))
+  }
 }
 
 function toggleChat() {
@@ -190,7 +250,7 @@ async function quit() {
 
     <Transition name="bar">
       <div v-if="passthrough" class="passthrough-hint no-drag" @click="togglePassthrough">
-        穿透中 · 点击恢复交互
+        穿透中 · 移到这里点一下恢复
       </div>
     </Transition>
   </div>

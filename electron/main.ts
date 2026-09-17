@@ -26,6 +26,32 @@ let tray: Tray | null = null
 /** 对话/设置面板是否开着。开着时窗口需要能拿焦点，否则输入框打不进字。 */
 let panelOpen = false
 
+/**
+ * 窗口当前是不是「点击穿透」。
+ *
+ * 为什么主进程要记这个：穿透态下窗口在忽略鼠标，页面上任何按钮都点不到，
+ * 用户可能就此卡死。所以托盘菜单必须知道这个状态，好给他一个不依赖鼠标的出口。
+ */
+let clickThrough = false
+
+/**
+ * 穿透态下唯一还接收鼠标的一小块区域（提示条），窗口内的 CSS 像素坐标。
+ *
+ * ⚠️ 为什么要在主进程盯着光标，而不是靠 Electron 的
+ * `setIgnoreMouseEvents(true, { forward: true })`：
+ * **实测那条路在这里根本不送事件**。窗口进入穿透后，页面收到的 mousemove
+ * 数量是 0（同一坐标在非穿透态下是正常收到的），也就是说「靠 hover 把交互打开」
+ * 这个思路在 Windows + 透明窗口上不成立 —— 提示条就成了一个
+ * 「需要用鼠标才能点到的、专门用来恢复鼠标的按钮」，逻辑上死锁。
+ *
+ * 主进程有一样东西不受窗口输入状态影响：`screen.getCursorScreenPoint()`
+ * （全局光标位置）。所以改成主进程自己盯着光标：压到提示条上就把窗口的
+ * 交互临时打开，移开就恢复穿透。点得到、也点得回去。
+ */
+let island: { x: number; y: number; width: number; height: number } | null = null
+let islandHot = false
+let islandTimer: NodeJS.Timeout | null = null
+
 /** koffi 是否可用。不可用时退回 Electron 的 focusable 方案（会有抢焦点问题，但至少能用） */
 const hasNativeStyle = nativeStyleSupported()
 
@@ -121,6 +147,7 @@ function createWindow() {
   win.on('show', () => {
     if (!win) return
     win.setIgnoreMouseEvents(true, { forward: true })
+    clickThrough = true // 上面这一行刚把窗口变成穿透态，托盘菜单要如实反映
     win.webContents.send('ui:reset-hover')
     if (!panelOpen) applyNoActivate(true)
     refreshTrayMenu()
@@ -157,9 +184,68 @@ function openPanel(panel: 'chat' | 'settings') {
   if (!win) return
   panelOpen = true
   applyNoActivate(false)
+  /*
+   * 穿透态下窗口在忽略鼠标 —— 面板就算弹出来也是点不动的，
+   * 所以这里先无条件摘掉穿透（渲染层那边会跟着把 passthrough 置 false）。
+   */
+  clickThrough = false
+  win.setIgnoreMouseEvents(false, { forward: true })
   win.show()
   win.focus()
   win.webContents.send('ui:open-panel', panel)
+  refreshTrayMenu()
+}
+
+/** 退出穿透。托盘菜单里那条出口走这里 */
+function exitClickThrough() {
+  clickThrough = false
+  island = null
+  islandHot = false
+  stopIslandWatch()
+  win?.setIgnoreMouseEvents(false, { forward: true })
+  win?.webContents.send('ui:exit-passthrough')
+  refreshTrayMenu()
+}
+
+/**
+ * 穿透期间盯着光标：只在提示条上给窗口留一块能点的区域。
+ *
+ * 120ms 一次是权衡：更快没必要（人的手不会瞬移），更慢会在
+ * 「移上去 → 点下去」之间漏掉一拍，表现就是偶尔点不动。
+ */
+function startIslandWatch() {
+  if (islandTimer) return
+  islandTimer = setInterval(() => {
+    if (!win) return
+
+    if (!clickThrough || !island) {
+      if (islandHot) {
+        islandHot = false
+        win.setIgnoreMouseEvents(true, { forward: true })
+      }
+      return
+    }
+
+    const p = screen.getCursorScreenPoint() // DIP 屏幕坐标，和窗口 bounds / CSS 像素同一套
+    const b = win.getBounds()
+    // 留一点余量：渲染层量矩形和光标位置之间总有一点点时序差，差几像素不该点不动
+    const SLACK = 6
+    const inside =
+      p.x >= b.x + island.x - SLACK &&
+      p.x <= b.x + island.x + island.width + SLACK &&
+      p.y >= b.y + island.y - SLACK &&
+      p.y <= b.y + island.y + island.height + SLACK
+
+    if (inside === islandHot) return
+    islandHot = inside
+    win.setIgnoreMouseEvents(!inside, { forward: true })
+  }, 120)
+  islandTimer.unref?.()
+}
+
+function stopIslandWatch() {
+  if (islandTimer) clearInterval(islandTimer)
+  islandTimer = null
 }
 
 function refreshTrayMenu() {
@@ -175,6 +261,18 @@ function refreshTrayMenu() {
       { label: '和她说话…', click: () => openPanel('chat') },
       { label: '设置…', click: () => openPanel('settings') },
       { type: 'separator' },
+      {
+        /*
+         * 穿透态下的救命出口。
+         *
+         * 穿透时窗口整个在忽略鼠标，页面上的「点击恢复交互」是一个
+         * 需要先用鼠标才能点到的按钮 —— 逻辑上就是个死锁。
+         * 托盘菜单是唯一不受影响的入口，所以这条必须在。
+         */
+        label: clickThrough ? '恢复交互（当前穿透中）' : '恢复交互',
+        enabled: clickThrough,
+        click: exitClickThrough,
+      },
       {
         // 观察开关放托盘而不是只放设置面板：这是隐私相关的开关，
         // 用户想关的时候应该一步就能关到，而不是翻两层菜单。
@@ -215,8 +313,31 @@ function createTray() {
 
 ipcMain.handle('window:setInteractive', (_e, interactive: boolean) => {
   if (!win) return false
-  // forward: true 让穿透状态下仍能收到 mousemove，用于判断何时恢复交互
+  // forward: true 是给「窗口被忽略时还能收到 mousemove」准备的，但实测它不送事件
+  // （见 island 的注释），真正的兜底是主进程自己盯光标。
   win.setIgnoreMouseEvents(!interactive, { forward: true })
+  if (clickThrough !== !interactive) {
+    clickThrough = !interactive
+    // 托盘里那条「恢复交互」的可用状态跟着变
+    refreshTrayMenu()
+  }
+  return true
+})
+
+/**
+ * 渲染层报告「穿透态下哪一块还能点」。
+ *
+ * 穿透开着的时候传提示条的矩形，退出时传 null。
+ */
+ipcMain.handle('window:passthroughIsland', (_e, rect: { x: number; y: number; width: number; height: number } | null) => {
+  island = rect
+  if (rect) {
+    islandHot = false
+    startIslandWatch()
+  } else {
+    islandHot = false
+    stopIslandWatch()
+  }
   return true
 })
 
@@ -328,6 +449,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   observer.stop()
+  stopIslandWatch()
   globalShortcut.unregisterAll()
   tray?.destroy()
   tray = null

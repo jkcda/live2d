@@ -54,6 +54,14 @@ interface NexusAPI {
 
   /** 订阅「窗口重新显示，悬停状态该复位」。返回取消订阅函数。 */
   onResetHover: (handler: () => void) => () => void
+
+  /** 订阅托盘菜单的「恢复交互」（穿透态下唯一点得到的出口）。返回取消订阅函数。 */
+  onExitPassthrough: (handler: () => void) => () => void
+
+  /** 报告穿透态下仍可点击的矩形（窗口内 CSS 像素），退出穿透传 null */
+  setPassthroughIsland: (
+    rect: { x: number; y: number; width: number; height: number } | null,
+  ) => Promise<boolean>
 }
 
 interface Window {

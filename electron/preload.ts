@@ -41,6 +41,29 @@ contextBridge.exposeInMainWorld('nexus', {
   },
 
   /**
+   * 报告「穿透态下哪一块还能点」（窗口内的 CSS 像素矩形），退出穿透时传 null。
+   *
+   * 穿透时窗口整个在忽略鼠标，主进程靠这个矩形 + 全局光标位置
+   * 决定什么时候临时把交互打开（详见 main.ts 里 island 的注释）。
+   */
+  setPassthroughIsland: (rect: { x: number; y: number; width: number; height: number } | null) =>
+    ipcRenderer.invoke('window:passthroughIsland', rect),
+
+  /**
+   * 订阅「托盘菜单要求恢复交互」。
+   *
+   * 穿透态下窗口在忽略鼠标，页面上的按钮点不到 —— 这是那条状态下
+   * 唯一不依赖鼠标的出口，所以必须留着。
+   */
+  onExitPassthrough: (handler: () => void) => {
+    const listener = () => handler()
+    ipcRenderer.on('ui:exit-passthrough', listener)
+    return () => {
+      ipcRenderer.removeListener('ui:exit-passthrough', listener)
+    }
+  },
+
+  /**
    * 订阅「窗口刚被显示，你的悬停状态该复位了」。
    *
    * hide() → show() 之后主进程会把穿透转发重新武装，但渲染层记的还是旧值，
