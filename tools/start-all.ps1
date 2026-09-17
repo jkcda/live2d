@@ -246,11 +246,11 @@ if ($bad.Count) {
   foreach ($b in $bad) { Write-Host "  · $($b.服务)：$(Join-Path $logs "$($b.键).err.log")" -ForegroundColor DarkYellow }
 } else {
   if ($Electron) {
-    Write-Host "全部就绪 ✅  她的窗口是桌宠形态（Electron），出现在桌面右下角" -ForegroundColor Green
+    Write-Host "全部就绪 - 她的窗口是桌宠形态（Electron），出现在桌面右下角" -ForegroundColor Green
     Write-Host "  托盘图标右键：隐藏 / 和她说话 / 设置 / 暂停观察 / 退出"
     Write-Host "  没看到她？确认发行版构建是最新的：pnpm build"
   } else {
-    Write-Host "全部就绪 ✅  她的窗口：http://localhost:$WebPort/" -ForegroundColor Green
+    Write-Host "全部就绪 - 她的窗口：http://localhost:$WebPort/" -ForegroundColor Green
   }
 }
 Write-Host "停止全部：.\tools\stop-all.ps1`n"
