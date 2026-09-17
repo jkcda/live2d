@@ -21,6 +21,7 @@ const TITLE_FILE = process.env.NEXUS_TITLE_FILE
 const INITIAL = process.env.NEXUS_TARGET_TITLE || 'NEXUS 验证靶子'
 
 const HTML = `<!doctype html><meta charset="utf-8">
+<title>${INITIAL.replace(/[<>&]/g, '')}</title>
 <body style="margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
 height:100vh;background:#12141a;color:#e8eaf0;font-family:system-ui,'Microsoft YaHei',sans-serif">
 <div style="font-size:44px">🎯</div>
@@ -40,14 +41,24 @@ app.whenReady().then(() => {
   win.setTitle(INITIAL)
 
   /*
-   * data: URL 的文档没有 <title>，Chromium 会把窗口标题设成 URL 本身，
-   * 所以标题得**持续**按压（而不是设一次就完）。
+   * 标题由文件驱动：验证要测「标题变了观察器跟不跟得上」，
+   * 而换标题不能靠重启进程 —— 重启会连窗口句柄一起换掉，测的就不是同一件事了。
+   *
+   * ★ 注意改的是**文档标题**（document.title），不是 win.setTitle()。
+   *
+   * 这不是风格问题：窗口标题的最终写入者是 Chromium —— 它按 document.title 覆盖。
+   * 如果这边用 win.setTitle() 硬写，就会和 Chromium 抢：文档没有 <title> 时
+   * Chromium 拿 data: URL 当标题，于是标题被反复改回去、这边又改回来，
+   * **标题栏每 200ms 闪一次**。
+   *
+   * 后果很实在：截图验证里「同一画面两次抓取哈希相同」永远不成立 ——
+   * 不是抓图不稳，是靶子自己在动。文档标题驱动就没有第二个写入者，标题栏静止。
    */
   const timer = setInterval(() => {
     if (!TITLE_FILE) return
     try {
       const t = fs.readFileSync(TITLE_FILE, 'utf8').trim()
-      if (t && t !== win.getTitle()) win.setTitle(t)
+      if (t) win.webContents.executeJavaScript(`document.title = ${JSON.stringify(t)}`).catch(() => {})
     } catch {
       /* 文件还没写到，下一轮再说 */
     }
