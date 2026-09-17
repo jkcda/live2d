@@ -105,6 +105,8 @@ export async function* streamChat(
  */
 export function createSentenceSplitter() {
   let pending = ''
+  /** 还没吐过第一句 —— 首句允许在逗号处提前切，让声音早一点出来 */
+  let first = true
 
   return {
     /** 喂入增量，返回本次可以送去合成的完整句子（可能为空数组） */
@@ -126,12 +128,34 @@ export function createSentenceSplitter() {
 
       pending = pending.slice(lastIndex)
 
-      // 兜底：单句过长（模型不吐标点）时强切，避免一直不发声
-      if (pending.length >= 60) {
+      /*
+       * ★ 首句在逗号处提前切一小段。
+       *
+       * 为什么专门为「第一句」破例：合成比播放慢的时候（实测 RTF 能到 1.5 上下，
+       * GPU 一忙更慢），30 字的一句 ≈ 6 秒音频 ≈ 9 秒合成 ——
+       * 等他听到第一个字，文字早就整段显示完了，听起来就是"她根本没说话"。
+       * 首句切短能把这等待砍掉一大半；后面的句子按句号切，语气是完整的。
+       */
+      if (first) {
+        const m = /^(.{8,}?)[，,、]/.exec(pending)
+        if (m) {
+          out.push(m[1].trim())
+          pending = pending.slice(m[0].length)
+        }
+      }
+
+      /*
+       * 兜底：单句过长（模型不吐标点）时强切，避免一直不发声。
+       *
+       * 30 字是权衡：原来 60 字时一句要合成十几秒，"话赶不上嘴"非常明显；
+       * 再短又会在句子中间切开发音，语气变碎。
+       */
+      if (pending.length >= 30) {
         out.push(pending.trim())
         pending = ''
       }
 
+      if (out.length) first = false
       return out
     },
 
@@ -139,6 +163,7 @@ export function createSentenceSplitter() {
     flush(): string {
       const rest = pending.trim()
       pending = ''
+      first = true
       return rest
     },
   }
