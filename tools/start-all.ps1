@@ -31,6 +31,19 @@ New-Item -ItemType Directory -Force -Path $logs | Out-Null
 $pidFile = Join-Path $logs "pids.json"
 
 <#
+  允许 `-Skip agent,web` 这种逗号写法。
+
+  直接跑 .ps1 时 PowerShell 会把它解析成数组；但经过 .cmd 包装转发时，
+  整个 "agent,web" 是**一个字符串**进来的 —— 不拆开的话
+  `$Skip -contains "agent"` 永远为 false，四个服务一个都不会被跳过。
+  表现是「明明写了 -Skip，还是全起来了」，而且不报错。
+#>
+$Skip = @($Skip) |
+  ForEach-Object { $_ -split ',' } |
+  ForEach-Object { $_.Trim() } |
+  Where-Object { $_ }
+
+<#
   ★ 清掉大小写重复的代理变量 —— 不清的话下面四个 Start-Process 全部失败。
 
   Windows 的环境变量块里可以同时存在 http_proxy 和 HTTP_PROXY，
@@ -142,15 +155,48 @@ Start-Svc -Name "agent" -Port $AgentPort -WorkDir (Join-Path $root "agent") `
 
 # ④ 前端：dev server（浏览器看）或 Electron（桌宠窗口）
 if ($Electron) {
-  if ($pnpmPath -and -not (Test-Port $WebPort)) {
+  if (-not $pnpmPath) {
+    $rows += [pscustomobject]@{ 服务="Electron 窗口"; 端口="—"; 结果="失败"; 说明="找不到 pnpm.cmd" }
+  } elseif (Test-Port $WebPort) {
+    <#
+      ★ dev server 已经在跑 —— 这时**直接开 Electron 窗口**，不要再 `pnpm dev`。
+
+      原来的写法是「5176 被占 → 跳过」（理由写得含糊：'dev server 已在跑，或 pnpm 不在 PATH'），
+      结果是用户敲了 `-Electron`，看到一行"跳过"，然后**桌面上什么都没有** ——
+      他没法从这行字里知道"那你让我怎么看到窗口"。
+
+      而且在浏览器模式（dev:web）下，5176 那个 dev server **永远不会**自己拉起 Electron
+      （vite 的 electron 插件只在 `pnpm dev` 里装），所以"已在跑"根本不是跳过它的理由。
+
+      真正该做的是：复用已经在跑的那个 dev server，只把 Electron 开出来
+      （VITE_DEV_SERVER_URL 指过去，主进程就走 loadURL 而不是 loadFile）。
+    #>
+    $env:VITE_DEV_SERVER_URL = "http://localhost:$WebPort"
+    $proc = Start-Process -FilePath $pnpmPath -ArgumentList @("exec", "electron", ".") `
+      -WorkingDirectory $root -WindowStyle Hidden -PassThru
+    $pids["electron"] = $proc.Id
+    $rows += [pscustomobject]@{ 服务="Electron 窗口"; 端口="—"; 结果="已启动"
+      说明="复用已在跑的 dev server（PID $($proc.Id)）" }
+  } else {
+    # 没有 dev server：pnpm dev 会把 vite 和 Electron 一起拉起来
     $proc = Start-Process -FilePath $pnpmPath -ArgumentList @("dev") -WorkingDirectory $root -WindowStyle Hidden -PassThru
     $pids["electron"] = $proc.Id
-    $rows += [pscustomobject]@{ 服务="Electron 窗口"; 端口="—"; 结果="已启动"; 说明="她会出现，可能需要几秒" }
-  } else {
-    $rows += [pscustomobject]@{ 服务="Electron 窗口"; 端口="—"; 结果="跳过"; 说明="dev server 已在跑，或 pnpm 不在 PATH" }
+    $rows += [pscustomobject]@{ 服务="Electron 窗口"; 端口="—"; 结果="已启动"; 说明="vite + Electron 一起起（PID $($proc.Id)）" }
   }
 } else {
   Start-Svc -Name "web" -Port $WebPort -WorkDir $root -File $pnpmPath -ArgList @("dev:web")
+}
+
+<#
+  等前端端口真的绑上，再生成下面那张表。
+
+  不等的话会看到「前端 5176 没起来」+「有 1 项没起来」——
+  把一次**成功**的启动报成失败（vite 从启动到监听要几秒，
+  而这张表是紧接着 Start-Process 就生成的）。
+#>
+if ($Electron -or $pids["web"]) {
+  $deadline = (Get-Date).AddSeconds(25)
+  while ((Get-Date) -lt $deadline -and -not (Test-Port $WebPort)) { Start-Sleep -Milliseconds 500 }
 }
 
 # 记录 PID：stop-all 优先按它精确停（按端口停容易误伤别的程序）
@@ -199,6 +245,12 @@ if ($bad.Count) {
   # 日志文件名用的是内部名（cosy/service/agent/web），不是上面那列中文显示名
   foreach ($b in $bad) { Write-Host "  · $($b.服务)：$(Join-Path $logs "$($b.键).err.log")" -ForegroundColor DarkYellow }
 } else {
-  Write-Host "全部就绪 ✅  她的窗口：http://localhost:$WebPort/" -ForegroundColor Green
+  if ($Electron) {
+    Write-Host "全部就绪 ✅  她的窗口是桌宠形态（Electron），出现在桌面右下角" -ForegroundColor Green
+    Write-Host "  托盘图标右键：隐藏 / 和她说话 / 设置 / 暂停观察 / 退出"
+    Write-Host "  没看到她？确认发行版构建是最新的：pnpm build"
+  } else {
+    Write-Host "全部就绪 ✅  她的窗口：http://localhost:$WebPort/" -ForegroundColor Green
+  }
 }
 Write-Host "停止全部：.\tools\stop-all.ps1`n"
