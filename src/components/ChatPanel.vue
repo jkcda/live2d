@@ -268,23 +268,29 @@ function onKeydown(e: KeyboardEvent) {
       </p>
 
       <div v-for="(b, i) in bubbles" :key="i" class="row" :class="b.role">
-        <!-- 工具调用：干活的痕迹要露出来（她上网查/开浏览器时，这几秒不能是黑箱） -->
-        <div v-if="b.chips?.length" class="chips">
-          <span
-            v-for="(chip, ci) in b.chips"
-            :key="ci"
-            class="chip"
-            :class="chip.status"
-            :title="chip.summary"
-          >
-            <span class="chip-dot" />
-            {{ chip.label }}<template v-if="chip.summary">：{{ chip.summary }}</template>
-          </span>
-        </div>
-        <div class="bubble" :class="{ failed: b.failed }">
-          <span v-if="!b.text" class="typing">…</span>
-          <!-- eslint-disable-next-line vue/no-v-html —— 内容来自本地 LLM，和 nexus 前端同一套渲染 -->
-          <div v-else class="msg-content" v-html="renderMarkdown(b.text)" />
+        <!--
+          一条消息 = 工具 chip + 气泡，装在同一个**纵向**容器里。
+          ★ 之前把 .chips 和 .bubble 做成 .row 的直接子节点，而 .row 是 flex ——
+            于是 chip 横着占位，把回复挤到旁边去了（用户原话："工具调用都把回复挤到哪里去了"）。
+        -->
+        <div class="stack">
+          <div v-if="b.chips?.length" class="chips">
+            <span
+              v-for="(chip, ci) in b.chips"
+              :key="ci"
+              class="chip"
+              :class="chip.status"
+              :title="chip.summary"
+            >
+              <span class="chip-dot" />
+              {{ chip.label }}<template v-if="chip.summary">：{{ chip.summary }}</template>
+            </span>
+          </div>
+          <div class="bubble" :class="{ failed: b.failed }">
+            <span v-if="!b.text" class="typing">…</span>
+            <!-- eslint-disable-next-line vue/no-v-html —— 内容来自本地 LLM，和 nexus 前端同一套渲染 -->
+            <div v-else class="msg-content" v-html="renderMarkdown(b.text)" />
+          </div>
         </div>
       </div>
 
@@ -403,8 +409,24 @@ function onKeydown(e: KeyboardEvent) {
   justify-content: flex-end;
 }
 
-.bubble {
+/*
+ * 一条消息的纵向容器（工具 chip 在上、气泡在下）。
+ * 宽度约束放在这里，气泡自己不再设 max-width —— 否则会变成 84% 的 84%，
+ * 回复的可用宽度凭空少一截。
+ */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   max-width: 84%;
+}
+
+.row.user .stack {
+  align-items: flex-end;
+}
+
+.bubble {
+  max-width: 100%;
   padding: 7px 10px;
   border-radius: 10px;
   font-size: 13px;

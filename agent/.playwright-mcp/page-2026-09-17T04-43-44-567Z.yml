@@ -1,0 +1,1519 @@
+- generic [active] [ref=f2e1]:
+  - navigation [ref=f2e4]:
+    - generic [ref=f2e5]:
+      - generic [ref=f2e6]:
+        - link [ref=f2e8] [cursor=pointer]:
+          - /url: //game.bilibili.com/?spm_id_from=555.117.0.0
+        - list [ref=f2e9]:
+          - listitem [ref=f2e10]:
+            - link " 主站" [ref=f2e11] [cursor=pointer]:
+              - /url: //www.bilibili.com/?spm_id_from=555.117.0.0
+              - generic [ref=f2e12]: 
+              - generic [ref=f2e13]: 主站
+          - listitem [ref=f2e14]:
+            - link "首页" [ref=f2e15] [cursor=pointer]:
+              - /url: //game.bilibili.com/platform?spm_id_from=555.117.0.0
+          - listitem [ref=f2e16]:
+            - link "排行榜" [ref=f2e17] [cursor=pointer]:
+              - /url: //game.bilibili.com/platform/ranks?spm_id_from=555.117.0.0
+          - listitem [ref=f2e18]:
+            - link "发现" [ref=f2e19] [cursor=pointer]:
+              - /url: //game.bilibili.com/platform/discover?spm_id_from=555.117.0.0
+          - listitem [ref=f2e20]:
+            - link "WIKI" [ref=f2e21] [cursor=pointer]:
+              - /url: //wiki.biligame.com/?spm_id_from=555.117.0.0
+          - listitem [ref=f2e22]:
+            - link "大会员礼包" [ref=f2e23] [cursor=pointer]:
+              - /url: //b-gift.biligame.com/?spm_id_from=555.117.0.0
+          - listitem [ref=f2e24]:
+            - link "充值中心" [ref=f2e25] [cursor=pointer]:
+              - /url: //pay.biligame.com/?spm_id_from=555.117.0.0#/?from=gc&selectedNav=pay
+          - listitem [ref=f2e26]:
+            - link "我的" [ref=f2e27] [cursor=pointer]:
+              - /url: //game.bilibili.com/platform/mine?spm_id_from=555.117.0.0
+      - generic [ref=f2e28]:
+        - generic [ref=f2e29]:
+          - textbox "搜索更多游戏&WIKI" [ref=f2e30]
+          - generic [ref=f2e31] [cursor=pointer]: 
+        - link [ref=f2e36] [cursor=pointer]:
+          - /url: https://passport.bilibili.com/login?gourl=https%3A%2F%2Fwiki.biligame.com%2Fys%2F%25E6%25B7%25B1%25E5%25A2%2583%25E8%259E%25BA%25E6%2597%258B
+  - generic [ref=f2e37]:
+    - generic [ref=f2e38]:
+      - link [ref=f2e40] [cursor=pointer]:
+        - /url: /ys/%E9%A6%96%E9%A1%B5
+      - listitem [ref=f2e42]:
+        - link "我的消息" [ref=f2e43] [cursor=pointer]:
+          - /url: javascript:void(0);
+      - generic [ref=f2e44] [cursor=pointer]: 关于本站
+      - generic [ref=f2e46]:
+        - generic [ref=f2e48]:
+          - link "首页" [ref=f2e50] [cursor=pointer]:
+            - /url: /ys/%E9%A6%96%E9%A1%B5
+          - link "导航" [ref=f2e52] [cursor=pointer]:
+            - /url: javascript:;
+          - link "图鉴" [ref=f2e55] [cursor=pointer]:
+            - /url: javascript:;
+          - link "深渊/玩法" [ref=f2e58] [cursor=pointer]:
+            - /url: javascript:;
+          - link "大地图" [ref=f2e61] [cursor=pointer]:
+            - /url: /ys/%E5%8E%9F%E7%A5%9E%E5%9C%B0%E5%9B%BE%E5%B7%A5%E5%85%B7_%E5%85%A8%E5%9C%B0%E6%A0%87%E4%BD%8D%E7%BD%AE%E7%82%B9
+          - link "小工具" [ref=f2e63] [cursor=pointer]:
+            - /url: javascript:;
+          - link "扩展阅读" [ref=f2e66] [cursor=pointer]:
+            - /url: javascript:;
+          - link "其他" [ref=f2e69] [cursor=pointer]:
+            - /url: javascript:;
+        - generic [ref=f2e74]:
+          - textbox "搜索原神WIKI_BWIKI_哔哩哔哩[alt-shift-f]" [ref=f2e75]:
+            - /placeholder: 本WIKI中搜索
+          - button "搜索" [ref=f2e76] [cursor=pointer]
+          - button "前往" [ref=f2e77] [cursor=pointer]
+    - main [ref=f2e78]:
+      - generic [ref=f2e80]:
+        - paragraph [ref=f2e82]:
+          - text: 本WIKI由
+          - link "旅行者酒馆" [ref=f2e83] [cursor=pointer]:
+            - /url: https://space.bilibili.com/489986571
+          - text: 于2020年03月14日申请开通，
+          - generic [ref=f2e84]:
+            - text: 内容按
+            - link "CC BY-NC-SA 4.0协议" [ref=f2e85] [cursor=pointer]:
+              - /url: https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans
+            - text: 提供
+          - text: ，编辑权限开放。
+          - link "免责声明" [ref=f2e86] [cursor=pointer]:
+            - /url: /ys/%E5%8E%9F%E7%A5%9E:%E5%85%8D%E8%B4%A3%E5%A3%B0%E6%98%8E
+          - text: •
+          - link "反馈留言" [ref=f2e87] [cursor=pointer]:
+            - /url: /ys/WIKI%E5%BB%BA%E8%AE%BE%E5%8F%8D%E9%A6%88%E5%8C%BA
+          - text: •
+          - link "编辑教程" [ref=f2e88] [cursor=pointer]:
+            - /url: /ys/%E5%8E%9F%E7%A5%9EWIKI%E7%BC%96%E8%BE%91%E6%95%99%E7%A8%8B
+          - text: •
+          - link "收藏方法" [ref=f2e89] [cursor=pointer]:
+            - /url: https://wiki.biligame.com/wiki/BWIKI%E6%94%B6%E8%97%8F%E5%88%B0%E6%A1%8C%E9%9D%A2%E7%9A%84%E6%96%B9%E6%B3%95%E8%AF%B4%E6%98%8E
+          - text: •
+          - link "评论管理规定" [ref=f2e90] [cursor=pointer]:
+            - /url: /ys/%E5%8E%9F%E7%A5%9E:%E5%8E%9F%E7%A5%9EWIKI%E8%AF%84%E8%AE%BA%E5%8C%BA%E7%AE%A1%E7%90%86%E6%9D%A1%E4%BE%8B
+          - text: • 交流群：1018709157 感谢
+          - link "大猫雷恩" [ref=f2e91] [cursor=pointer]:
+            - /url: https://space.bilibili.com/784639
+          - text: 对WIKI设计支持，期待更多能人异士加入原神WIKI。
+        - paragraph
+      - generic [ref=f2e92]:
+        - heading "深境螺旋" [level=1] [ref=f2e93]
+        - generic [ref=f2e94]:
+          - navigation [ref=f2e95] [cursor=pointer]:
+            - heading "WIKI功能" [level=3] [ref=f2e96]: 
+          - generic [ref=f2e98]:
+            - paragraph [ref=f2e99]: 阅读：65.8万
+            - paragraph [ref=f2e100]: 更新日期：2025-09-17
+            - paragraph [ref=f2e101]: 最新编辑：郊原清新
+      - generic [ref=f2e102]:
+        - link "跳到导航" [ref=f2e103] [cursor=pointer]:
+          - /url: "#mw-head"
+        - link "跳到搜索" [ref=f2e104] [cursor=pointer]:
+          - /url: "#p-search"
+        - generic [ref=f2e105]:
+          - link "页面贡献者 :" [ref=f2e106] [cursor=pointer]:
+            - /url: /ys/%E7%89%B9%E6%AE%8A:%E8%B4%A1%E7%8C%AE%E8%80%85/%E6%B7%B1%E5%A2%83%E8%9E%BA%E6%97%8B
+          - generic [ref=f2e107]:
+            - link [ref=f2e110] [cursor=pointer]:
+              - /url: //space.bilibili.com/3570506/
+            - link [ref=f2e114] [cursor=pointer]:
+              - /url: //space.bilibili.com/8510930/
+            - link [ref=f2e118] [cursor=pointer]:
+              - /url: //space.bilibili.com/475359835/
+          - generic [ref=f2e120]:
+            - link [ref=f2e123] [cursor=pointer]:
+              - /url: //space.bilibili.com/11693457/
+            - link [ref=f2e127] [cursor=pointer]:
+              - /url: //space.bilibili.com/2083603333/
+            - link [ref=f2e131] [cursor=pointer]:
+              - /url: //space.bilibili.com/158180/
+            - link [ref=f2e135] [cursor=pointer]:
+              - /url: //space.bilibili.com/1898885317/
+            - link [ref=f2e139] [cursor=pointer]:
+              - /url: //space.bilibili.com/1891738273/
+            - link [ref=f2e143] [cursor=pointer]:
+              - /url: //space.bilibili.com/522397861/
+            - link [ref=f2e147] [cursor=pointer]:
+              - /url: //space.bilibili.com/1370672020/
+          - generic [ref=f2e149] [cursor=pointer]: 共30人编辑
+        - generic [ref=f2e152]:
+          - generic [ref=f2e153]:
+            - generic [ref=f2e154]:
+              - superscript [ref=f2e155]:
+                - link "阅" [ref=f2e156] [cursor=pointer]:
+                  - /url: https://wiki.biligame.com/ys/%E6%B7%B1%E5%A2%83%E8%9E%BA%E6%97%8B
+              - superscript [ref=f2e157]:
+                - link "编" [ref=f2e158] [cursor=pointer]:
+                  - /url: https://wiki.biligame.com/ys/index.php?title=%E6%B7%B1%E5%A2%83%E8%9E%BA%E6%97%8B&action=edit
+              - superscript [ref=f2e159]:
+                - link "刷" [ref=f2e160] [cursor=pointer]:
+                  - /url: https://wiki.biligame.com/ys/index.php?title=%E6%B7%B1%E5%A2%83%E8%9E%BA%E6%97%8B&action=purge
+              - superscript [ref=f2e161]:
+                - link "历" [ref=f2e162] [cursor=pointer]:
+                  - /url: https://wiki.biligame.com/ys/index.php?title=%E6%B7%B1%E5%A2%83%E8%9E%BA%E6%97%8B&action=history
+            - generic [ref=f2e163]:
+              - link "首页" [ref=f2e164] [cursor=pointer]:
+                - /url: /ys/%E9%A6%96%E9%A1%B5
+              - text: "> 深境螺旋"
+          - separator [ref=f2e165]
+          - generic [ref=f2e166]:
+            - text: 如果是第一次来，按"Ctrl+D"可以收藏随时查看更新~觉得WIKI好玩的话，请推荐给朋友哦～(◕ω＜)☆ 按右上角“WIKI功能→编辑”即可修改页面内容，新建相应的图鉴页请点击
+            - link [ref=f2e167] [cursor=pointer]:
+              - /url: /ys/%E5%88%9B%E5%BB%BA%E6%96%B0%E9%A1%B5%E9%9D%A2
+              - img "创建图鉴.png" [ref=f2e168]
+            - text: 。
+          - generic [ref=f2e169]:
+            - generic [ref=f2e170]: 常驻挑战
+            - generic [ref=f2e171]:
+              - paragraph:
+                - generic: 深境螺旋
+                - link "幻想真境剧诗":
+                  - /url: /ys/%E5%B9%BB%E6%83%B3%E7%9C%9F%E5%A2%83%E5%89%A7%E8%AF%97
+                - link "幽境危战":
+                  - /url: /ys/%E5%B9%BD%E5%A2%83%E5%8D%B1%E6%88%98
+          - generic [ref=f2e175]:
+            - generic [ref=f2e176]: 深境螺旋
+            - generic [ref=f2e177]:
+              - paragraph:
+                - generic: 深境螺旋总览
+                - link "当期深境螺旋":
+                  - /url: /ys/%E6%B8%8A%E6%9C%88%E8%9E%BA%E6%97%8B
+                - link "渊月螺旋1-8层":
+                  - /url: /ys/%E6%B7%B1%E5%A2%83%E5%9B%9E%E5%BB%8A
+          - heading "基本信息" [level=2] [ref=f2e181]
+          - list [ref=f2e182]:
+            - listitem [ref=f2e183]: 深境螺旋位于马斯克礁上，在誓言岬的东面。
+            - listitem [ref=f2e184]:
+              - text: 第一次前往时，标准走法为通过誓言岬处的黑洞前往。
+              - generic [ref=f2e185]:
+                - text: 你可以试试游过去（不必当真，体力不够可以试试用
+                - link "凯亚" [ref=f2e186] [cursor=pointer]:
+                  - /url: /ys/%E5%87%AF%E4%BA%9A
+                - text: 或者
+                - link "芙宁娜" [ref=f2e187] [cursor=pointer]:
+                  - /url: /ys/%E8%8A%99%E5%AE%81%E5%A8%9C
+                - text: ）。
+            - listitem [ref=f2e188]: 相传通往天空岛之人，在神之眼中——在幻视中，看到的天梯也是如此螺旋的形态。我们走向宇宙，或者下到深渊。并没有差别，因为都是未知的漆黑。
+            - listitem [ref=f2e189]: 前八层称为“深境回廊”，不会刷新；第九至第十二层称为“渊月螺旋”，其中第九、第十层在N.0重置时会换一次怪，第十一、第十二层会在每月重置时换一次怪。
+          - heading "提示" [level=2] [ref=f2e190]
+          - paragraph [ref=f2e191]: 挑战深境螺旋时，以下小技巧或许可以降低难度：
+          - list [ref=f2e192]:
+            - listitem [ref=f2e193]: 因为每日的降福buff是随机的，如果今天的buff很差（如练的是元素队却给了物理伤害buff），可以“暂时离开”，明天遇到好的buff再“继续挑战”。
+            - listitem [ref=f2e194]: 每一期的祝福带来的提升很可观，有条件的话可以用上。如这期是角色身上带盾加伤，那可以考虑在队伍中加入盾角色。
+            - listitem [ref=f2e195]: 挑战成绩以每一间最好成绩为准。也就是说第一次这层三间分别打了3/2/1星，刷星的时候就可以不考虑第一间的时间，打过即可，而专注于第二三间的配队。即使第二次打了0/3/3星，那么你的最终成绩会是全3星（满星）。你可以根据每间怪物的特性和弱点分两到三次完成，每次将一至两间打到3星，这就是凹深渊。
+            - listitem [ref=f2e196]: ESC退出时选择“暂时离开”，然后重进时选“继续挑战”，可以保留挑战进度，但不能保留半间进度。举例来说，12-2上半打完，下半主C暴毙了，于是你选择ESC-暂时离开，然后重新进入-继续挑战，那你会从12-2上半选降福buff开始。
+            - listitem [ref=f2e197]:
+              - text: 挑战过程中打开
+              - link "冒险之证" [ref=f2e198] [cursor=pointer]:
+                - /url: /ys/%E5%86%92%E9%99%A9%E4%B9%8B%E8%AF%81
+              - text: （F1）、地图（M）、
+              - link "祈愿" [ref=f2e199] [cursor=pointer]:
+                - /url: /ys/%E7%A5%88%E6%84%BF
+              - text: （F3）等界面可以达到暂停的效果。暂停时，能量球会正常流向角色，而怪物与玩家的操作及挑战倒计时均会暂停，可以借此节省等待能量球飞向角色的时间。
+          - heading "场地/光环技能" [level=2] [ref=f2e200]
+          - heading "光环技能一览" [level=3] [ref=f2e201]
+          - table [ref=f2e202]:
+            - rowgroup [ref=f2e203]:
+              - row [ref=f2e204]:
+                - columnheader "图片" [ref=f2e205]
+                - columnheader "光环怪图" [ref=f2e206]
+                - columnheader "名称" [ref=f2e207]
+                - columnheader "应对方式" [ref=f2e208]
+              - row [ref=f2e209]:
+                - cell [ref=f2e210]:
+                  - link [ref=f2e211] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E5%86%B0%E7%89%A2.png
+                    - img "冰牢.png" [ref=f2e212]
+                - cell [ref=f2e213]:
+                  - link [ref=f2e214] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E5%86%B0%E7%89%A2%E5%85%89%E7%8E%AF.png
+                    - img "冰牢光环.png" [ref=f2e215]
+                - cell "冰牢" [ref=f2e216]
+                - cell "外形像冰爪子，会困住角色无法逃脱。固定每12秒出现一次，刚出现范围预警时冲刺出冰牢范围可规避，如已经被困，则只要不动/不进行会触碰到冰牢爪子的动作就不会造成伤害。真实的物理引擎被困住了也可以长枪系角色使用重击钻出（或用高些的角色跳出）万叶/散兵可以跳/飞出去" [ref=f2e217]
+              - row [ref=f2e218]:
+                - cell [ref=f2e219]:
+                  - link [ref=f2e220] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E9%9B%B7%E5%85%89%E7%9F%A9%E9%98%B5.png
+                    - img "雷光矩阵.png" [ref=f2e221]
+                - cell [ref=f2e222]:
+                  - link [ref=f2e223] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E9%9B%B7%E5%85%89%E7%9F%A9%E9%98%B5%E5%85%89%E7%8E%AF.png
+                    - img "雷光矩阵光环.png" [ref=f2e224]
+                - cell "雷光矩阵" [ref=f2e225]
+                - cell "三角形的雷光电光状的线。触碰到会受到雷元素伤害，不要触碰到线即可。尤其是身上带有水元素时。酥酥麻麻的哟~" [ref=f2e226]
+              - row [ref=f2e227]:
+                - cell [ref=f2e228]:
+                  - link [ref=f2e229] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E8%BF%BD%E8%B8%AA%E7%81%AB%E7%90%83.png
+                    - img "追踪火球.png" [ref=f2e230]
+                - cell [ref=f2e231]:
+                  - link [ref=f2e232] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E8%BF%BD%E8%B8%AA%E7%81%AB%E7%90%83%E5%85%89%E7%8E%AF.png
+                    - img "追踪火球光环.png" [ref=f2e233]
+                - cell "追踪火球" [ref=f2e234]
+                - cell "当角色具有火附着时，怪物会召唤自动追踪人物的火球。注意会打断角色技能，嘲讽技能有效。" [ref=f2e235]
+              - row [ref=f2e236]:
+                - cell [ref=f2e237]:
+                  - link [ref=f2e238] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E7%BF%BB%E6%B6%8C%E5%B2%A9%E6%BD%AE.png
+                    - img "翻涌岩潮.png" [ref=f2e239]
+                - cell [ref=f2e240]:
+                  - link [ref=f2e241] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E7%BF%BB%E6%B6%8C%E5%B2%A9%E6%BD%AE%E5%85%89%E7%8E%AF.png
+                    - img "翻涌岩潮光环.png" [ref=f2e242]
+                - cell "翻涌岩潮" [ref=f2e243]
+                - cell "多波呈波浪状的岩石潮，会从角色视角的正前方召唤。冲刺无敌帧不能规避伤害。" [ref=f2e244]
+              - row [ref=f2e245]:
+                - cell [ref=f2e246]:
+                  - link [ref=f2e247] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E6%B0%B4%E6%B3%A1.png
+                    - img "水泡.png" [ref=f2e248]
+                - cell [ref=f2e249]:
+                  - link [ref=f2e250] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E6%B0%B4%E6%B3%A1%E5%85%89%E7%8E%AF.png
+                    - img "水泡光环.png" [ref=f2e251]
+                - cell "水泡" [ref=f2e252]
+                - cell "召唤很多泡泡出现在角色附近。与困住人的泡泡不同，这种泡泡触碰会破裂并造成伤害。" [ref=f2e253]
+              - row [ref=f2e254]:
+                - cell [ref=f2e255]:
+                  - link [ref=f2e256] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E9%BB%91%E5%85%89.png
+                    - img "黑光.png" [ref=f2e257]
+                - cell [ref=f2e258]:
+                  - link [ref=f2e259] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E9%BB%91%E5%85%89%E5%85%89%E7%8E%AF.png
+                    - img "黑光光环.png" [ref=f2e260]
+                - cell "黑光" [ref=f2e261]
+                - cell "周期性地以怪物为中心出现一个范围极大的指示圈，然后从中心生成冰浪造成伤害。仅在冰系怪物身上出现" [ref=f2e262]
+          - paragraph [ref=f2e263]: 说明：由固定某只怪物（脚下会有对应颜色的光环）附带，击杀该怪物后则不再出现光环技能。
+          - heading "地脉异常一览" [level=3] [ref=f2e264]
+          - table [ref=f2e265]:
+            - rowgroup [ref=f2e266]:
+              - row [ref=f2e267]:
+                - columnheader "地脉异常图" [ref=f2e268]
+                - columnheader "名称" [ref=f2e269]
+                - columnheader "介绍" [ref=f2e270]
+                - columnheader "应对方式" [ref=f2e271]
+              - row [ref=f2e272]:
+                - cell [ref=f2e273]:
+                  - link [ref=f2e274] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E9%98%B4%E7%87%83%E4%B9%8B%E7%81%AB.png
+                    - img "阴燃之火.png" [ref=f2e275]
+                - cell "阴燃之火" [ref=f2e276]
+                - cell "处于「阴燃之火」状态下的角色，会受到火元素持续伤害。如果能通过元素反应将角色附着的火元素消除的话，就能解除这种状态。" [ref=f2e277]
+                - cell [ref=f2e278]:
+                  - text: 只需要治疗量足够即可，
+                  - link [ref=f2e280] [cursor=pointer]:
+                    - /url: /ys/%E8%8A%AD%E8%8A%AD%E6%8B%89
+                    - img "芭芭拉" [ref=f2e281]
+                  - link "芭芭拉" [ref=f2e282] [cursor=pointer]:
+                    - /url: /ys/%E8%8A%AD%E8%8A%AD%E6%8B%89
+                  - text: 的E技能可以给自身附着水元素抵消火元素并进行持续治疗，最合适应对阴燃之火
+              - row [ref=f2e283]:
+                - cell [ref=f2e284]:
+                  - link [ref=f2e285] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E5%87%9D%E7%BB%93%E4%B9%8B%E5%86%B0.png
+                    - img "凝结之冰.png" [ref=f2e286]
+                - cell "凝结之冰" [ref=f2e287]
+                - cell "处于「凝结之冰」状态下的角色，消耗的体力会增加。如果能通过元素反应将角色附着的冰元素消除的话，就能解除这种状态。" [ref=f2e288]
+                - cell "班尼特、琴的元素爆发；辛焱、芭芭拉、行秋的元素战技能够给自己以及队友解除这个效果。雷泽、北斗也能通过给予自身雷元素附着来解除效果。" [ref=f2e289]
+              - row [ref=f2e290]:
+                - cell [ref=f2e291]:
+                  - link [ref=f2e292] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E5%97%9C%E8%83%BD%E4%B9%8B%E9%9B%B7.png
+                    - img "嗜能之雷.png" [ref=f2e293]
+                - cell "嗜能之雷" [ref=f2e294]
+                - cell "「嗜能之雷」状态会不断消耗角色的元素能量。如果能通过元素反应将角色附着的雷元素消除的话，就能解除这种状态。" [ref=f2e295]
+                - cell "迪奥娜、辛焱在上盾的时候会给予自身短暂的元素附着，护盾存在期间切换角色，也会给予短暂的元素附着，可以在护盾存在期间通过不断地切人来解除这个负面效果。 班尼特、琴的元素爆发也能够为自己和队友驱散这个负面效果。" [ref=f2e296]: 迪奥娜、辛焱在上盾的时候会给予自身短暂的元素附着，护盾存在期间切换角色，也会给予短暂的元素附着，可以在护盾存在期间通过不断地切人来解除这个负面效果。班尼特、琴的元素爆发也能够为自己和队友驱散这个负面效果。
+              - row [ref=f2e297]:
+                - cell [ref=f2e298]:
+                  - link [ref=f2e299] [cursor=pointer]:
+                    - /url: /ys/%E6%96%87%E4%BB%B6:%E8%BF%9F%E6%BB%9E%E4%B9%8B%E6%B0%B4.png
+                    - img "迟滞之水.png" [ref=f2e300]
+                - cell "迟滞之水" [ref=f2e301]
+                - cell "「迟滞之水」状态会延长技能冷却时间。如果能通过元素反应将角色附着的水元素消除的话，就能解除这种状态。" [ref=f2e302]
+                - cell [ref=f2e303]:
+                  - text: "1."
+                  - link [ref=f2e305] [cursor=pointer]:
+                    - /url: /ys/%E7%8F%AD%E5%B0%BC%E7%89%B9
+                    - img "班尼特" [ref=f2e306]
+                  - link "班尼特" [ref=f2e307] [cursor=pointer]:
+                    - /url: /ys/%E7%8F%AD%E5%B0%BC%E7%89%B9
+                  - text: 、
+                  - link [ref=f2e309] [cursor=pointer]:
+                    - /url: /ys/%E7%90%B4
+                    - img "琴" [ref=f2e310]
+                  - link "琴" [ref=f2e311] [cursor=pointer]:
+                    - /url: /ys/%E7%90%B4
+                  - text: 的元素爆发可以给处于范围内的角色上元素附着，从而驱散队友或者自己身上的负面效果。 2.使用
+                  - link [ref=f2e313] [cursor=pointer]:
+                    - /url: /ys/%E7%94%98%E9%9B%A8
+                    - img "甘雨" [ref=f2e314]
+                  - link "甘雨" [ref=f2e315] [cursor=pointer]:
+                    - /url: /ys/%E7%94%98%E9%9B%A8
+                  - text: 、
+                  - link [ref=f2e317] [cursor=pointer]:
+                    - /url: /ys/%E5%87%9D%E5%85%89
+                    - img "凝光" [ref=f2e318]
+                  - link "凝光" [ref=f2e319] [cursor=pointer]:
+                    - /url: /ys/%E5%87%9D%E5%85%89
+                  - text: 、
+                  - link [ref=f2e321] [cursor=pointer]:
+                    - /url: /ys/%E5%8F%AF%E8%8E%89
+                    - img "可莉" [ref=f2e322]
+                  - link "可莉" [ref=f2e323] [cursor=pointer]:
+                    - /url: /ys/%E5%8F%AF%E8%8E%89
+                  - text: ，等普攻、重击强势且对技能大招依赖不大的输出角色，无视debuff输出。3.
+                  - link [ref=f2e325] [cursor=pointer]:
+                    - /url: /ys/%E8%BE%9B%E7%84%B1
+                    - img "辛焱" [ref=f2e326]
+                  - link "辛焱" [ref=f2e327] [cursor=pointer]:
+                    - /url: /ys/%E8%BE%9B%E7%84%B1
+                  - text: 的盾会给自身上一次弱火附着，护盾存在期间，切换角色会给当前场上角色上一个短暂存在的弱火附着，可以通过带祭礼大剑和频繁切人来达到解除负面效果的目的
+          - heading "介绍" [level=2] [ref=f2e328]
+          - heading "深境螺旋" [level=3] [ref=f2e329]
+          - paragraph [ref=f2e330]: 由早已覆灭的远古文明，修建的巨大地下古都。究竟是出于何种目的而修建，如今已经不可知。其结构被分为连结世界的「深境回廊」与通往未知的「渊月螺旋」，故此统称为「深境螺旋」。据说，其中埋葬着早已被这个世界遗忘的秘密与宝藏… 觊觎着其中宝藏与知识的人与魔物，占据了这座螺旋塔。战胜各层各关的挑战，剿灭其中的敌人，赢得「渊星」，就能获得隐藏在其中的，某种伟大意志的嘉许吧…
+          - heading "规则：渊星、间与层" [level=3] [ref=f2e331]
+          - paragraph [ref=f2e332]: 深境螺旋的空间由「层」划分。每一层，包含了3「间」。 完成挑战时，能获得「渊星」。通过每一层的3间，并获得至少6颗渊星，才能获得进入下一层的资格。
+          - heading "规则：深境回廊与渊月螺旋" [level=3] [ref=f2e333]
+          - paragraph [ref=f2e334]: 深境螺旋由两部分组成：「深境回廊」与「渊月螺旋」。完成深境回廊所有8层后将开启「渊月螺旋」。 或许是因为某个世界的月相变动，渊月螺旋每月会自行重置一次，发生在每月的第十六日… 而连接世界与渊月螺旋，隐藏着丰厚宝藏的深境回廊，不会随时间重置与变化。
+          - heading "规则：限制与地脉异常" [level=3] [ref=f2e335]
+          - paragraph [ref=f2e336]: 深境螺旋的战斗中，存在各种限制。在每层的3间连续挑战中，将无法：
+          - list [ref=f2e337]:
+            - listitem [ref=f2e338]: 使用食物等道具；
+            - listitem [ref=f2e339]: 调整队伍成员；
+            - listitem [ref=f2e340]: 更换圣遗物与武器装备；
+            - listitem [ref=f2e341]: 进行升级、突破等角色养成。
+          - paragraph [ref=f2e342]:
+            - text: 此外，在深境螺旋的每一层中，存在着各自不同的「地脉异常」，地脉异常会对其中的角色与敌人造成各种正面或负面效果。希望能高效地攻克关卡的话，在队伍配置时与战斗中，也应积极将地脉异常的效果纳入考量。
+            - link "点击查看各类地脉异常" [ref=f2e343] [cursor=pointer]:
+              - /url: /ys/%E6%B7%B1%E5%A2%83%E8%9E%BA%E6%97%8B#场地/光环技能
+          - heading "规则：祝福与降福" [level=3] [ref=f2e344]
+          - paragraph [ref=f2e345]: 挑战者会得到来自深境螺旋深处的认可与期许。这份认可与期许，能化作让人奋战不止的力量。 每两周，深境螺旋中会可能出现不同的祝福，提供各种各样的增益效果。当前周期的效果可以通过「渊月祝福」查阅。 此外，每一间开始时，可以选择一种「深秘降福」。不同的降福会拥有各异的效果，与持续时间：
+          - list [ref=f2e346]:
+            - listitem [ref=f2e347]: 此层生效：持续直到进入下一层；
+            - listitem [ref=f2e348]: 本间生效：持续直到进入下一间；
+            - listitem [ref=f2e349]: 立即生效：如字面所示，立刻发生。
+          - paragraph [ref=f2e350]: 根据当前队伍的情况，选择适合的降福，能更有效地应对挑战。
+          - heading "规则：路径分叉" [level=3] [ref=f2e351]
+          - paragraph [ref=f2e352]: 据说深境螺旋的某些地方，存在着分岔的路径。要继续深入的话，就需要兵分两路，一同攻克… 一些间会分为上半与下半两部分。要通过的话，需要将所拥有的角色编成两支队伍，每支队伍由1~4名角色组成，分别完成上半与下半各自的挑战。两支队伍的角色不能重复。
+          - heading "规则：渊月螺旋敌人生命倍率和敌人等级" [level=3] [ref=f2e353]
+          - table [ref=f2e354]:
+            - rowgroup [ref=f2e355]:
+              - row [ref=f2e356]:
+                - columnheader "层数" [ref=f2e357]
+                - columnheader "生命倍率" [ref=f2e358]
+                - columnheader "BOSS等级" [ref=f2e359]
+              - row [ref=f2e360]:
+                - columnheader "第1间" [ref=f2e361]
+                - columnheader "第2间" [ref=f2e362]
+                - columnheader "第3间" [ref=f2e363]
+              - row [ref=f2e364]:
+                - cell "9" [ref=f2e365]
+                - cell "2" [ref=f2e366]
+                - cell "72" [ref=f2e367]
+                - cell "74" [ref=f2e368]
+                - cell "76" [ref=f2e369]
+              - row [ref=f2e370]:
+                - cell "10" [ref=f2e371]
+                - cell "2" [ref=f2e372]
+                - cell "80" [ref=f2e373]
+                - cell "82" [ref=f2e374]
+                - cell "85" [ref=f2e375]
+              - row [ref=f2e376]:
+                - cell "11" [ref=f2e377]
+                - cell "不固定" [ref=f2e378]
+                - cell "88" [ref=f2e379]
+                - cell "90" [ref=f2e380]
+                - cell "92" [ref=f2e381]
+              - row [ref=f2e382]:
+                - cell "12" [ref=f2e383]
+                - cell "95" [ref=f2e384]
+                - cell "98" [ref=f2e385]
+                - cell "100" [ref=f2e386]
+          - heading "规则：奖励与重置" [level=3] [ref=f2e387]
+          - paragraph [ref=f2e388]: 攻克深境螺旋能获得不菲的奖励。每一间首次挑战成功时，都可以领取「间之秘宝」；每一层中获得一定的渊星后，能领取「星之秘宝」。奖励可以通过「奖励预览」查看。 每个月的第十六日，将会重置渊月螺旋的奖励，并可能产生新的渊月祝福。 深境回廊的奖励不会随时间重置。 5.1版本新增跳过功能，上期满星通关第11层可以跳过第9层，上期满星通关第12层则可以跳过第9和第10层。
+          - heading "间之秘宝" [level=4] [ref=f2e389]
+          - table [ref=f2e390]:
+            - rowgroup
+            - rowgroup [ref=f2e391]:
+              - row [ref=f2e392]:
+                - rowheader "第9层 第1间" [ref=f2e393]
+                - cell [ref=f2e394]:
+                  - link [ref=f2e396] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e397]
+                  - link "摩拉" [ref=f2e398] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 20000
+                  - link [ref=f2e400] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e401]
+                  - link "大英雄的经验" [ref=f2e402] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e404] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e405]
+                  - link "冒险家的经验" [ref=f2e406] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 3
+                  - link [ref=f2e408] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e409]
+                  - link "精锻用魔矿" [ref=f2e410] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 5
+                  - link [ref=f2e412] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e413]
+                  - link "深秘圣物匣·二等" [ref=f2e414] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e415]:
+                - rowheader "第9层 第2间" [ref=f2e416]
+                - cell [ref=f2e417]:
+                  - link [ref=f2e419] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e420]
+                  - link "摩拉" [ref=f2e421] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 20000
+                  - link [ref=f2e423] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e424]
+                  - link "大英雄的经验" [ref=f2e425] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e427] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e428]
+                  - link "冒险家的经验" [ref=f2e429] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 3
+                  - link [ref=f2e431] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e432]
+                  - link "精锻用魔矿" [ref=f2e433] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 5
+                  - link [ref=f2e435] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e436]
+                  - link "深秘圣物匣·二等" [ref=f2e437] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e438]:
+                - rowheader "第9层 第3间" [ref=f2e439]
+                - cell [ref=f2e440]:
+                  - link [ref=f2e442] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e443]
+                  - link "摩拉" [ref=f2e444] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 20000
+                  - link [ref=f2e446] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e447]
+                  - link "大英雄的经验" [ref=f2e448] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e450] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e451]
+                  - link "冒险家的经验" [ref=f2e452] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 3
+                  - link [ref=f2e454] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e455]
+                  - link "精锻用魔矿" [ref=f2e456] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 5
+                  - link [ref=f2e458] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                    - img "深秘圣物匣·一等" [ref=f2e459]
+                  - link "深秘圣物匣·一等" [ref=f2e460] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e461]:
+                - rowheader "第10层 第1间" [ref=f2e462]
+                - cell [ref=f2e463]:
+                  - link [ref=f2e465] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e466]
+                  - link "摩拉" [ref=f2e467] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 25000
+                  - link [ref=f2e469] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e470]
+                  - link "大英雄的经验" [ref=f2e471] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e473] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e474]
+                  - link "冒险家的经验" [ref=f2e475] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 3
+                  - link [ref=f2e477] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e478]
+                  - link "精锻用魔矿" [ref=f2e479] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 6
+                  - link [ref=f2e481] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e482]
+                  - link "深秘圣物匣·二等" [ref=f2e483] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e484]:
+                - rowheader "第10层 第2间" [ref=f2e485]
+                - cell [ref=f2e486]:
+                  - link [ref=f2e488] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e489]
+                  - link "摩拉" [ref=f2e490] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 25000
+                  - link [ref=f2e492] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e493]
+                  - link "大英雄的经验" [ref=f2e494] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e496] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e497]
+                  - link "冒险家的经验" [ref=f2e498] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 3
+                  - link [ref=f2e500] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e501]
+                  - link "精锻用魔矿" [ref=f2e502] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 6
+                  - link [ref=f2e504] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e505]
+                  - link "深秘圣物匣·二等" [ref=f2e506] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e507]:
+                - rowheader "第10层 第3间" [ref=f2e508]
+                - cell [ref=f2e509]:
+                  - link [ref=f2e511] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e512]
+                  - link "摩拉" [ref=f2e513] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 25000
+                  - link [ref=f2e515] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e516]
+                  - link "大英雄的经验" [ref=f2e517] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e519] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e520]
+                  - link "冒险家的经验" [ref=f2e521] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 3
+                  - link [ref=f2e523] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e524]
+                  - link "精锻用魔矿" [ref=f2e525] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 6
+                  - link [ref=f2e527] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                    - img "深秘圣物匣·一等" [ref=f2e528]
+                  - link "深秘圣物匣·一等" [ref=f2e529] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e530]:
+                - rowheader "第11层 第1间" [ref=f2e531]
+                - cell [ref=f2e532]:
+                  - link [ref=f2e534] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e535]
+                  - link "摩拉" [ref=f2e536] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 30000
+                  - link [ref=f2e538] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e539]
+                  - link "大英雄的经验" [ref=f2e540] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e542] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e543]
+                  - link "冒险家的经验" [ref=f2e544] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 4
+                  - link [ref=f2e546] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e547]
+                  - link "精锻用魔矿" [ref=f2e548] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 6
+                  - link [ref=f2e550] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e551]
+                  - link "深秘圣物匣·二等" [ref=f2e552] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e553]:
+                - rowheader "第11层 第2间" [ref=f2e554]
+                - cell [ref=f2e555]:
+                  - link [ref=f2e557] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e558]
+                  - link "摩拉" [ref=f2e559] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 30000
+                  - link [ref=f2e561] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e562]
+                  - link "大英雄的经验" [ref=f2e563] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e565] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e566]
+                  - link "冒险家的经验" [ref=f2e567] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 4
+                  - link [ref=f2e569] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e570]
+                  - link "精锻用魔矿" [ref=f2e571] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 6
+                  - link [ref=f2e573] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e574]
+                  - link "深秘圣物匣·二等" [ref=f2e575] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e576]:
+                - rowheader "第11层 第3间" [ref=f2e577]
+                - cell [ref=f2e578]:
+                  - link [ref=f2e580] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e581]
+                  - link "摩拉" [ref=f2e582] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 30000
+                  - link [ref=f2e584] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e585]
+                  - link "大英雄的经验" [ref=f2e586] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e588] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e589]
+                  - link "冒险家的经验" [ref=f2e590] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 4
+                  - link [ref=f2e592] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e593]
+                  - link "精锻用魔矿" [ref=f2e594] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 6
+                  - link [ref=f2e596] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                    - img "深秘圣物匣·一等" [ref=f2e597]
+                  - link "深秘圣物匣·一等" [ref=f2e598] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e599]:
+                - rowheader "第12层 第1间" [ref=f2e600]
+                - cell [ref=f2e601]:
+                  - link [ref=f2e603] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e604]
+                  - link "摩拉" [ref=f2e605] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 40000
+                  - link [ref=f2e607] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e608]
+                  - link "大英雄的经验" [ref=f2e609] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e611] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e612]
+                  - link "冒险家的经验" [ref=f2e613] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 4
+                  - link [ref=f2e615] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e616]
+                  - link "精锻用魔矿" [ref=f2e617] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 7
+                  - link [ref=f2e619] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e620]
+                  - link "深秘圣物匣·二等" [ref=f2e621] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e622]:
+                - rowheader "第12层 第2间" [ref=f2e623]
+                - cell [ref=f2e624]:
+                  - link [ref=f2e626] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e627]
+                  - link "摩拉" [ref=f2e628] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 40000
+                  - link [ref=f2e630] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e631]
+                  - link "大英雄的经验" [ref=f2e632] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e634] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e635]
+                  - link "冒险家的经验" [ref=f2e636] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 4
+                  - link [ref=f2e638] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e639]
+                  - link "精锻用魔矿" [ref=f2e640] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 7
+                  - link [ref=f2e642] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e643]
+                  - link "深秘圣物匣·二等" [ref=f2e644] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e645]:
+                - rowheader "第12层 第3间" [ref=f2e646]
+                - cell [ref=f2e647]:
+                  - link [ref=f2e649] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e650]
+                  - link "摩拉" [ref=f2e651] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 40000
+                  - link [ref=f2e653] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e654]
+                  - link "大英雄的经验" [ref=f2e655] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 2
+                  - link [ref=f2e657] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e658]
+                  - link "冒险家的经验" [ref=f2e659] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 4
+                  - link [ref=f2e661] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e662]
+                  - link "精锻用魔矿" [ref=f2e663] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 7
+                  - link [ref=f2e665] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                    - img "深秘圣物匣·一等" [ref=f2e666]
+                  - link "深秘圣物匣·一等" [ref=f2e667] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                  - text: × 1
+              - row [ref=f2e668]:
+                - rowheader "合计" [ref=f2e669]
+                - cell [ref=f2e670]:
+                  - link [ref=f2e672] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e673]
+                  - link "摩拉" [ref=f2e674] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 345000
+                  - link [ref=f2e676] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "大英雄的经验" [ref=f2e677]
+                  - link "大英雄的经验" [ref=f2e678] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%A7%E8%8B%B1%E9%9B%84%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 24
+                  - link [ref=f2e680] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                    - img "冒险家的经验" [ref=f2e681]
+                  - link "冒险家的经验" [ref=f2e682] [cursor=pointer]:
+                    - /url: /ys/%E5%86%92%E9%99%A9%E5%AE%B6%E7%9A%84%E7%BB%8F%E9%AA%8C
+                  - text: × 42
+                  - link [ref=f2e684] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                    - img "精锻用魔矿" [ref=f2e685]
+                  - link "精锻用魔矿" [ref=f2e686] [cursor=pointer]:
+                    - /url: /ys/%E7%B2%BE%E9%94%BB%E7%94%A8%E9%AD%94%E7%9F%BF
+                  - text: × 72
+                  - link [ref=f2e688] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                    - img "深秘圣物匣·二等" [ref=f2e689]
+                  - link "深秘圣物匣·二等" [ref=f2e690] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%BA%8C%E7%AD%89
+                  - text: × 8
+                  - link [ref=f2e692] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                    - img "深秘圣物匣·一等" [ref=f2e693]
+                  - link "深秘圣物匣·一等" [ref=f2e694] [cursor=pointer]:
+                    - /url: /ys/%E6%B7%B1%E7%A7%98%E5%9C%A3%E7%89%A9%E5%8C%A3%C2%B7%E4%B8%80%E7%AD%89
+                  - text: × 4
+            - rowgroup
+          - heading "星之秘宝" [level=4] [ref=f2e695]
+          - paragraph [ref=f2e696]: 1-8每层可领取：
+          - table [ref=f2e697]:
+            - rowgroup [ref=f2e698]:
+              - row [ref=f2e699]:
+                - rowheader "3星" [ref=f2e700]
+                - cell [ref=f2e701]:
+                  - link [ref=f2e703] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e704]
+                  - link "原石" [ref=f2e705] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 100
+                  - link [ref=f2e707] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e708]
+                  - link "摩拉" [ref=f2e709] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 15000
+              - row [ref=f2e710]:
+                - rowheader "6星" [ref=f2e711]
+                - cell [ref=f2e712]:
+                  - link [ref=f2e714] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e715]
+                  - link "原石" [ref=f2e716] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 100
+                  - link [ref=f2e718] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e719]
+                  - link "摩拉" [ref=f2e720] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 20000
+              - row [ref=f2e721]:
+                - rowheader "9星" [ref=f2e722]
+                - cell [ref=f2e723]:
+                  - link [ref=f2e725] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e726]
+                  - link "原石" [ref=f2e727] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 100
+                  - link [ref=f2e729] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e730]
+                  - link "摩拉" [ref=f2e731] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 25000
+              - row [ref=f2e732]:
+                - rowheader "全满星累计" [ref=f2e733]
+                - cell [ref=f2e734]:
+                  - link [ref=f2e736] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e737]
+                  - link "原石" [ref=f2e738] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 2400
+                  - link [ref=f2e740] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e741]
+                  - link "摩拉" [ref=f2e742] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 480000
+          - paragraph [ref=f2e743]: 9-12每层可领取：
+          - table [ref=f2e744]:
+            - rowgroup [ref=f2e745]:
+              - row [ref=f2e746]:
+                - rowheader "3星" [ref=f2e747]
+                - cell [ref=f2e748]:
+                  - link [ref=f2e750] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e751]
+                  - link "原石" [ref=f2e752] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 50
+                  - link [ref=f2e754] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e755]
+                  - link "摩拉" [ref=f2e756] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 15000
+              - row [ref=f2e757]:
+                - rowheader "6星" [ref=f2e758]
+                - cell [ref=f2e759]:
+                  - link [ref=f2e761] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e762]
+                  - link "原石" [ref=f2e763] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 50
+                  - link [ref=f2e765] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e766]
+                  - link "摩拉" [ref=f2e767] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 20000
+              - row [ref=f2e768]:
+                - rowheader "9星" [ref=f2e769]
+                - cell [ref=f2e770]:
+                  - link [ref=f2e772] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e773]
+                  - link "原石" [ref=f2e774] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 100
+                  - link [ref=f2e776] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e777]
+                  - link "摩拉" [ref=f2e778] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 25000
+              - row [ref=f2e779]:
+                - rowheader "全满星累计" [ref=f2e780]
+                - cell [ref=f2e781]:
+                  - link [ref=f2e783] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                    - img "原石" [ref=f2e784]
+                  - link "原石" [ref=f2e785] [cursor=pointer]:
+                    - /url: /ys/%E5%8E%9F%E7%9F%B3
+                  - text: × 800
+                  - link [ref=f2e787] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                    - img "摩拉" [ref=f2e788]
+                  - link "摩拉" [ref=f2e789] [cursor=pointer]:
+                    - /url: /ys/%E6%91%A9%E6%8B%89
+                  - text: × 240000
+          - heading "调整历史" [level=2] [ref=f2e790]
+          - paragraph [ref=f2e791]: 从开服至4.6版本，渊月螺旋均为每半个月刷新一次（在每月的1号与16号），9-12层的星之秘宝奖励只有150原石（50x3）；自4.7版本第一期渊月螺旋（2024年6月下）起，渊月螺旋更改为每月刷新一次，同时将9-12层的星之秘宝奖励调整至200原石（50x2+100），满星累计可以获得800原石。 开服至5.0版本，渊月螺旋第9-11层的BOSS生命值一般为同等级大世界怪物的2倍，第12层的BOSS生命值一般为同等级大世界怪物的2.5倍。 从5.1第一期开始，第12层的生命值倍率开始发生变动，其中5.1第一期是3.75倍，5.1第二期是3倍。
+          - generic [ref=f2e792]:
+            - generic [ref=f2e793]: 原神WIKI导航
+            - generic [ref=f2e795]:
+              - list [ref=f2e796]:
+                - listitem [ref=f2e797]:
+                  - generic [ref=f2e798]:
+                    - img "选项装饰1.png" [ref=f2e799]
+                    - img "元素火.png" [ref=f2e800]
+                    - text: 火
+                    - img "选项装饰1.png" [ref=f2e801]
+                - listitem [ref=f2e802]:
+                  - generic [ref=f2e803]:
+                    - img "选项装饰1.png" [ref=f2e804]
+                    - img "元素水.png" [ref=f2e805]
+                    - text: 水
+                    - img "选项装饰1.png" [ref=f2e806]
+                - listitem [ref=f2e807]:
+                  - generic [ref=f2e808]:
+                    - img "选项装饰1.png" [ref=f2e809]
+                    - img "元素风.png" [ref=f2e810]
+                    - text: 风
+                    - img "选项装饰1.png" [ref=f2e811]
+                - listitem [ref=f2e812]:
+                  - generic [ref=f2e813]:
+                    - img "选项装饰1.png" [ref=f2e814]
+                    - img "元素雷.png" [ref=f2e815]
+                    - text: 雷
+                    - img "选项装饰1.png" [ref=f2e816]
+                - listitem [ref=f2e817]:
+                  - generic [ref=f2e818]:
+                    - img "选项装饰1.png" [ref=f2e819]
+                    - img "元素草.png" [ref=f2e820]
+                    - text: 草
+                    - img "选项装饰1.png" [ref=f2e821]
+                - listitem [ref=f2e822]:
+                  - generic [ref=f2e823]:
+                    - img "选项装饰1.png" [ref=f2e824]
+                    - img "元素冰.png" [ref=f2e825]
+                    - text: 冰
+                    - img "选项装饰1.png" [ref=f2e826]
+                - listitem [ref=f2e827]:
+                  - generic [ref=f2e828]:
+                    - img "选项装饰1.png" [ref=f2e829]
+                    - img "元素岩.png" [ref=f2e830]
+                    - text: 岩
+                    - img "选项装饰1.png" [ref=f2e831]
+                - listitem [ref=f2e832]:
+                  - generic [ref=f2e833]:
+                    - img "选项装饰1.png" [ref=f2e834]
+                    - text: 单手剑
+                    - img "选项装饰1.png" [ref=f2e835]
+                - listitem [ref=f2e836]:
+                  - generic [ref=f2e837]:
+                    - img "选项装饰1.png" [ref=f2e838]
+                    - text: 双手剑
+                    - img "选项装饰1.png" [ref=f2e839]
+                - listitem [ref=f2e840]:
+                  - generic [ref=f2e841]:
+                    - img "选项装饰1.png" [ref=f2e842]
+                    - text: 长柄武器
+                    - img "选项装饰1.png" [ref=f2e843]
+                - listitem [ref=f2e844]:
+                  - generic [ref=f2e845]:
+                    - img "选项装饰1.png" [ref=f2e846]
+                    - text: 法器
+                    - img "选项装饰1.png" [ref=f2e847]
+                - listitem [ref=f2e848]:
+                  - generic [ref=f2e849]:
+                    - img "选项装饰1.png" [ref=f2e850]
+                    - text: 弓
+                    - img "选项装饰1.png" [ref=f2e851]
+                - listitem [ref=f2e852]:
+                  - generic [ref=f2e853]:
+                    - img "选项装饰1.png" [ref=f2e854]
+                    - text: 圣遗物
+                    - img "选项装饰1.png" [ref=f2e855]
+              - generic [ref=f2e858]:
+                - generic [ref=f2e859]:
+                  - link [ref=f2e860] [cursor=pointer]:
+                    - /url: /ys/%E5%B0%BC%E5%8F%AF
+                    - img "无背景-角色-尼可.png" [ref=f2e861]
+                  - generic: 尼可
+                - generic [ref=f2e862]:
+                  - link [ref=f2e863] [cursor=pointer]:
+                    - /url: /ys/%E6%9D%9C%E6%9E%97
+                    - img "无背景-角色-杜林.png" [ref=f2e864]
+                  - generic: 杜林
+                - generic [ref=f2e865]:
+                  - link [ref=f2e866] [cursor=pointer]:
+                    - /url: /ys/%E7%8E%9B%E8%96%87%E5%8D%A1
+                    - img "无背景-角色-玛薇卡.png" [ref=f2e867]
+                  - generic: 玛薇卡
+                - generic [ref=f2e868]:
+                  - link [ref=f2e869] [cursor=pointer]:
+                    - /url: /ys/%E6%97%85%E8%A1%8C%E8%80%85/%E7%81%AB
+                    - img "无背景-角色-旅行者/火.png" [ref=f2e870]
+                  - generic: 旅行者（火）
+                - generic [ref=f2e871]:
+                  - link [ref=f2e872] [cursor=pointer]:
+                    - /url: /ys/%E9%98%BF%E8%95%BE%E5%A5%87%E8%AF%BA
+                    - img "无背景-角色-阿蕾奇诺.png" [ref=f2e873]
+                  - generic: 阿蕾奇诺
+                - generic [ref=f2e874]:
+                  - link [ref=f2e875] [cursor=pointer]:
+                    - /url: /ys/%E6%9E%97%E5%B0%BC
+                    - img "无背景-角色-林尼.png" [ref=f2e876]
+                  - generic: 林尼
+                - generic [ref=f2e877]:
+                  - link [ref=f2e878] [cursor=pointer]:
+                    - /url: /ys/%E8%BF%AA%E5%B8%8C%E9%9B%85
+                    - img "无背景-角色-迪希雅.png" [ref=f2e879]
+                  - generic: 迪希雅
+                - generic [ref=f2e880]:
+                  - link [ref=f2e881] [cursor=pointer]:
+                    - /url: /ys/%E5%AE%B5%E5%AE%AB
+                    - img "无背景-角色-宵宫.png" [ref=f2e882]
+                  - generic: 宵宫
+                - generic [ref=f2e883]:
+                  - link [ref=f2e884] [cursor=pointer]:
+                    - /url: /ys/%E8%83%A1%E6%A1%83
+                    - img "无背景-角色-胡桃.png" [ref=f2e885]
+                  - generic: 胡桃
+                - generic [ref=f2e886]:
+                  - link [ref=f2e887] [cursor=pointer]:
+                    - /url: /ys/%E5%8F%AF%E8%8E%89
+                    - img "无背景-角色-可莉.png" [ref=f2e888]
+                  - generic: 可莉
+                - generic [ref=f2e889]:
+                  - link [ref=f2e890] [cursor=pointer]:
+                    - /url: /ys/%E8%BF%AA%E5%8D%A2%E5%85%8B
+                    - img "无背景-角色-迪卢克.png" [ref=f2e891]
+                  - generic: 迪卢克
+                - generic [ref=f2e892]:
+                  - link [ref=f2e893] [cursor=pointer]:
+                    - /url: /ys/%E5%98%89%E6%98%8E
+                    - img "无背景-角色-嘉明.png" [ref=f2e894]
+                  - generic: 嘉明
+                - generic [ref=f2e895]:
+                  - link [ref=f2e896] [cursor=pointer]:
+                    - /url: /ys/%E5%A4%8F%E6%B2%83%E8%95%BE
+                    - img "无背景-角色-夏沃蕾.png" [ref=f2e897]
+                  - generic: 夏沃蕾
+                - generic [ref=f2e898]:
+                  - link [ref=f2e899] [cursor=pointer]:
+                    - /url: /ys/%E6%89%98%E9%A9%AC
+                    - img "无背景-角色-托马.png" [ref=f2e900]
+                  - generic: 托马
+                - generic [ref=f2e901]:
+                  - link [ref=f2e902] [cursor=pointer]:
+                    - /url: /ys/%E7%83%9F%E7%BB%AF
+                    - img "无背景-角色-烟绯.png" [ref=f2e903]
+                  - generic: 烟绯
+                - generic [ref=f2e904]:
+                  - link [ref=f2e905] [cursor=pointer]:
+                    - /url: /ys/%E8%BE%9B%E7%84%B1
+                    - img "无背景-角色-辛焱.png" [ref=f2e906]
+                  - generic: 辛焱
+                - generic [ref=f2e907]:
+                  - link [ref=f2e908] [cursor=pointer]:
+                    - /url: /ys/%E5%AE%89%E6%9F%8F
+                    - img "无背景-角色-安柏.png" [ref=f2e909]
+                  - generic: 安柏
+                - generic [ref=f2e910]:
+                  - link [ref=f2e911] [cursor=pointer]:
+                    - /url: /ys/%E7%8F%AD%E5%B0%BC%E7%89%B9
+                    - img "无背景-角色-班尼特.png" [ref=f2e912]
+                  - generic: 班尼特
+                - generic [ref=f2e913]:
+                  - link [ref=f2e914] [cursor=pointer]:
+                    - /url: /ys/%E9%A6%99%E8%8F%B1
+                    - img "无背景-角色-香菱.png" [ref=f2e915]
+                  - generic: 香菱
+      - generic [ref=f2e916]:
+        - heading "评论" [level=3] [ref=f2e917]
+        - generic [ref=f2e921]:
+          - textbox "请各位准守原神WIKI评论规定的情况下，进行发言。" [ref=f2e922]
+          - generic [ref=f2e923]:
+            - button "预览"
+            - button "提交" [ref=f2e924] [cursor=pointer]
+        - generic [ref=f2e925]:
+          - generic [ref=f2e926]: 热门评论
+          - generic [ref=f2e931]:
+            - generic [ref=f2e932]:
+              - link "秋天河畔对岸的风" [ref=f2e934] [cursor=pointer]:
+                - /url: https://space.bilibili.com/13792908
+              - generic [ref=f2e937]: 7楼
+            - generic [ref=f2e938]: 我还以为能看每层的怪物属性呢
+            - generic [ref=f2e939]:
+              - generic [ref=f2e940]: 2020年11月16日, 15:50:17
+              - generic [ref=f2e941]: "222"
+          - generic [ref=f2e946]:
+            - generic [ref=f2e947]:
+              - link "千帆伴月" [ref=f2e949] [cursor=pointer]:
+                - /url: https://space.bilibili.com/123303537
+              - generic [ref=f2e952]: 5楼
+            - generic [ref=f2e953]: 希望能把螺旋各层敌人属性也贴出来呀:）
+            - generic [ref=f2e954]:
+              - generic [ref=f2e955]: 2020年10月30日, 22:36:12
+              - generic [ref=f2e956]: "87"
+          - generic [ref=f2e961]:
+            - generic [ref=f2e962]:
+              - link "邻家天使是椎名真昼" [ref=f2e964] [cursor=pointer]:
+                - /url: https://space.bilibili.com/149583877
+              - generic [ref=f2e967]: 1楼
+            - generic [ref=f2e968]: 有些关看地形，直接把敌人打下去也可以算击杀哦
+            - generic [ref=f2e969]:
+              - generic [ref=f2e970]: 2020年9月16日, 20:30:31
+              - generic [ref=f2e971]: "67"
+          - generic [ref=f2e972]: 全部评论66
+        - generic [ref=f2e973]:
+          - generic [ref=f2e978]:
+            - generic [ref=f2e979]:
+              - link "神秘的粉毛女士" [ref=f2e981] [cursor=pointer]:
+                - /url: https://space.bilibili.com/1939802320
+              - generic [ref=f2e984]: 164楼
+            - generic [ref=f2e985]: 现版本11层为2.5倍血量，12为3.75倍血量，一直不改了
+            - generic [ref=f2e986]:
+              - generic [ref=f2e987]: 2026年1月25日, 18:11:12
+              - generic [ref=f2e988]: "2"
+          - generic [ref=f2e993]:
+            - generic [ref=f2e994]:
+              - link "菁姹" [ref=f2e996] [cursor=pointer]:
+                - /url: https://space.bilibili.com/3546715359545880
+              - generic [ref=f2e999]: 162楼
+            - generic [ref=f2e1000]: 红温之地，无需多言
+            - generic [ref=f2e1001]:
+              - generic [ref=f2e1002]: 2025年8月29日, 10:26:51
+              - generic [ref=f2e1003]: "2"
+          - generic [ref=f2e1008]:
+            - generic [ref=f2e1009]:
+              - link "不关小烧脑的事哦" [ref=f2e1011] [cursor=pointer]:
+                - /url: https://space.bilibili.com/155313290
+              - generic [ref=f2e1014]: 161楼
+            - generic [ref=f2e1015]: 是你们那你。，
+            - generic [ref=f2e1016]: 2025年5月30日, 18:23:41
+          - generic [ref=f2e1022]:
+            - generic [ref=f2e1023]:
+              - link "不关小烧脑的事哦" [ref=f2e1025] [cursor=pointer]:
+                - /url: https://space.bilibili.com/155313290
+              - generic [ref=f2e1028]: 160楼
+            - generic [ref=f2e1029]: .
+            - generic [ref=f2e1030]: 2025年5月30日, 18:22:19
+          - generic [ref=f2e1036]:
+            - generic [ref=f2e1037]:
+              - link "冰脉络绎" [ref=f2e1039] [cursor=pointer]:
+                - /url: https://space.bilibili.com/431593594
+              - generic [ref=f2e1042]: 157楼
+            - generic [ref=f2e1043]: 其实777*
+            - generic [ref=f2e1044]: 2025年4月29日, 17:26:24
+          - generic [ref=f2e1050]:
+            - generic [ref=f2e1051]:
+              - link "冰脉络绎" [ref=f2e1053] [cursor=pointer]:
+                - /url: https://space.bilibili.com/431593594
+              - generic [ref=f2e1056]: 156楼
+            - generic [ref=f2e1057]: 杀杀杀杀杀杀杀7！七坡山..…
+            - generic [ref=f2e1058]: 2025年4月29日, 17:26:22
+          - generic [ref=f2e1064]:
+            - generic [ref=f2e1065]:
+              - link "是千笔不是铅笔" [ref=f2e1067] [cursor=pointer]:
+                - /url: https://space.bilibili.com/3546658444937424
+              - generic [ref=f2e1070]: 153楼
+            - generic [ref=f2e1071]: 那个黑洞我当时钻不进去，游过去的，当时用早就过去了。一个北地烟熏鸡的CD是5分钟，我让早柚泡了15分钟。
+            - generic [ref=f2e1072]:
+              - generic [ref=f2e1073]: 2025年2月28日, 17:55:41
+              - generic [ref=f2e1074]: "1"
+          - generic [ref=f2e1079]:
+            - generic [ref=f2e1080]:
+              - link "我的老婆是泡芙" [ref=f2e1082] [cursor=pointer]:
+                - /url: https://space.bilibili.com/3546572950341814
+              - generic [ref=f2e1085]: 150楼
+            - generic [ref=f2e1086]: U
+            - generic [ref=f2e1087]: 2024年9月19日, 00:08:01
+          - generic [ref=f2e1093]:
+            - generic [ref=f2e1094]:
+              - link "㻏霏" [ref=f2e1096] [cursor=pointer]:
+                - /url: https://space.bilibili.com/487950996
+              - generic [ref=f2e1099]: 142楼
+            - generic [ref=f2e1100]: "[0000000000]"
+            - generic [ref=f2e1101]: 2024年7月26日, 17:24:39
+          - generic [ref=f2e1103]:
+            - generic [ref=f2e1107]:
+              - generic [ref=f2e1108]:
+                - link "你酥皮蛋挞大跌是sanb" [ref=f2e1110] [cursor=pointer]:
+                  - /url: https://space.bilibili.com/3546667521411183
+                - generic [ref=f2e1113]: 141楼
+              - generic [ref=f2e1114]: 难道只有我是用凯亚铺冰过去的吗？
+              - generic [ref=f2e1115]:
+                - generic [ref=f2e1116]: 2024年7月20日, 16:23:58
+                - generic [ref=f2e1117]: "3"
+            - generic [ref=f2e1122]:
+              - link "0ct_conge" [ref=f2e1125] [cursor=pointer]:
+                - /url: https://space.bilibili.com/1872741234
+              - generic [ref=f2e1128]:
+                - link "@你酥皮蛋挞大跌是sanb" [ref=f2e1129] [cursor=pointer]:
+                  - /url: https://space.bilibili.com/3546667521411183
+                - text: wc酥皮蛋挞
+              - generic [ref=f2e1130]: 2024年9月17日, 22:01:37
+            - generic [ref=f2e1136]:
+              - link "小白村陈家" [ref=f2e1139] [cursor=pointer]:
+                - /url: https://space.bilibili.com/3493259076700407
+              - generic [ref=f2e1142]:
+                - link "@你酥皮蛋挞大跌是sanb" [ref=f2e1143] [cursor=pointer]:
+                  - /url: https://space.bilibili.com/3546667521411183
+                - text: 我也是这么过去的，铺了很久
+              - generic [ref=f2e1144]:
+                - generic [ref=f2e1145]: 2025年1月1日, 20:24:51
+                - generic [ref=f2e1146]: "1"
+        - generic [ref=f2e1147]:
+          - generic [ref=f2e1148] [cursor=pointer]: "1"
+          - generic [ref=f2e1149] [cursor=pointer]: "2"
+          - generic [ref=f2e1150] [cursor=pointer]: "3"
+          - generic [ref=f2e1151] [cursor=pointer]: "4"
+          - generic [ref=f2e1152] [cursor=pointer]: "5"
+          - generic [ref=f2e1153] [cursor=pointer]: ...
+          - generic [ref=f2e1154] [cursor=pointer]: "7"
+          - generic [ref=f2e1155] [cursor=pointer]: 下一页
+    - generic [ref=f2e1156]:
+      - link "BWIKI首页" [ref=f2e1157] [cursor=pointer]:
+        - /url: https://wiki.biligame.com/wiki/%E9%A6%96%E9%A1%B5
+      - link "创建WIKI" [ref=f2e1159] [cursor=pointer]:
+        - /url: "https://wiki.biligame.com/wiki/WIKI%E7%94%B3%E8%AF%B7%E9%A1%B5%E9%9D%A2 "
+      - link "BWIKI君" [ref=f2e1161] [cursor=pointer]:
+        - /url: https://space.bilibili.com/477233102
+      - link "分享" [ref=f2e1163] [cursor=pointer]:
+        - /url: javascript:void(false)
+      - link "BWIKI客服" [ref=f2e1164] [cursor=pointer]:
+        - /url: https://message.bilibili.com/?spm_id_from=333.999.0.0#/whisper/mid477233102
+  - generic [ref=f2e1168]:
+    - link [ref=f2e1170] [cursor=pointer]:
+      - /url: //www.bilibili.com
+    - generic [ref=f2e1174]:
+      - paragraph [ref=f2e1175]:
+        - link "游戏中心" [ref=f2e1176] [cursor=pointer]:
+          - /url: //www.biligame.com/
+        - text: "|"
+        - link "帐号安全" [ref=f2e1177] [cursor=pointer]:
+          - /url: https://account.bilibili.com/
+        - text: "|"
+        - link "找回密码" [ref=f2e1178] [cursor=pointer]:
+          - /url: https://account.bilibili.com/resetpwd
+        - text: "|"
+        - link "家长监控" [ref=f2e1179] [cursor=pointer]:
+          - /url: //jiazhang.biligame.com/
+        - text: "|"
+        - link "用户协议" [ref=f2e1180] [cursor=pointer]:
+          - /url: //yhxy.biligame.com/
+      - paragraph
+      - paragraph [ref=f2e1181]: 抵制不良游戏 拒绝盗版游戏 注意自我保护 谨防受骗上当 适度游戏益脑 沉迷游戏伤身 合理安排时间 享受健康生活
+      - paragraph [ref=f2e1182]: 芜湖享游网络技术有限公司 | COPYRIGHT © 2009-2026 BILIBILI ALL RIGHTS RESERVED.
+      - paragraph [ref=f2e1183]: 皖网文[2023]1840-026号 | 皖B2-20180007-2 | 皖ICP证：皖B2-20180007
+      - paragraph [ref=f2e1184]:
+        - link "沪公网安备 31011002002714 号" [ref=f2e1185] [cursor=pointer]:
+          - /url: http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=31011002002714
+  - generic [ref=f2e1187]:
+    - generic [ref=f2e1189] [cursor=pointer]
+    - list [ref=f2e1192]:
+      - listitem [ref=f2e1193]:
+        - link "首页" [ref=f2e1194] [cursor=pointer]:
+          - /url: /ys/%E9%A6%96%E9%A1%B5
+      - listitem [ref=f2e1195]:
+        - generic [ref=f2e1196] [cursor=pointer]
+        - link "导航" [ref=f2e1197] [cursor=pointer]:
+          - /url: javascript:;
+      - listitem [ref=f2e1198]:
+        - generic [ref=f2e1199] [cursor=pointer]
+        - link "图鉴" [ref=f2e1200] [cursor=pointer]:
+          - /url: javascript:;
+      - listitem [ref=f2e1201]:
+        - generic [ref=f2e1202] [cursor=pointer]
+        - link "深渊/玩法" [ref=f2e1203] [cursor=pointer]:
+          - /url: javascript:;
+      - listitem [ref=f2e1204]:
+        - link "大地图" [ref=f2e1205] [cursor=pointer]:
+          - /url: /ys/%E5%8E%9F%E7%A5%9E%E5%9C%B0%E5%9B%BE%E5%B7%A5%E5%85%B7_%E5%85%A8%E5%9C%B0%E6%A0%87%E4%BD%8D%E7%BD%AE%E7%82%B9
+      - listitem [ref=f2e1206]:
+        - generic [ref=f2e1207] [cursor=pointer]
+        - link "小工具" [ref=f2e1208] [cursor=pointer]:
+          - /url: javascript:;
+      - listitem [ref=f2e1209]:
+        - generic [ref=f2e1210] [cursor=pointer]
+        - link "扩展阅读" [ref=f2e1211] [cursor=pointer]:
+          - /url: javascript:;
+      - listitem [ref=f2e1212]:
+        - generic [ref=f2e1213] [cursor=pointer]
+        - link "其他" [ref=f2e1214] [cursor=pointer]:
+          - /url: javascript:;
+    - generic [ref=f2e1215]:
+      - link "BWIKI首页" [ref=f2e1216] [cursor=pointer]:
+        - /url: https://wiki.biligame.com/wiki/%E9%A6%96%E9%A1%B5
+      - link "创建WIKI" [ref=f2e1217] [cursor=pointer]:
+        - /url: https://wiki.biligame.com/wiki/WIKI%E7%94%B3%E8%AF%B7%E9%A1%B5%E9%9D%A2
+      - link "BWIKI客服" [ref=f2e1218] [cursor=pointer]:
+        - /url: https://space.bilibili.com/477233102?spm_id_from=333.337.0.0
+      - link "BWIKI君" [ref=f2e1219] [cursor=pointer]:
+        - /url: https://space.bilibili.com/477233102
+  - generic [ref=f2e1220]:
+    - generic [ref=f2e1221]:
+      - generic [ref=f2e1222] [cursor=pointer]
+      - heading "目录" [level=2] [ref=f2e1223]
+    - list [ref=f2e1224]:
+      - listitem [ref=f2e1225]:
+        - link "1 基本信息" [ref=f2e1226] [cursor=pointer]:
+          - /url: "#基本信息"
+      - listitem [ref=f2e1227]:
+        - link "2 提示" [ref=f2e1228] [cursor=pointer]:
+          - /url: "#提示"
+      - listitem [ref=f2e1229]:
+        - generic [ref=f2e1230] [cursor=pointer]
+        - link "3 场地/光环技能" [ref=f2e1231] [cursor=pointer]:
+          - /url: "#场地/光环技能"
+      - listitem [ref=f2e1232]:
+        - generic [ref=f2e1233] [cursor=pointer]
+        - link "4 介绍" [ref=f2e1234] [cursor=pointer]:
+          - /url: "#介绍"
+      - listitem [ref=f2e1235]:
+        - link "5 调整历史" [ref=f2e1236] [cursor=pointer]:
+          - /url: "#调整历史"
+  - navigation "目录" [ref=f2e1237]:
+    - generic [ref=f2e1238] [cursor=pointer]:
+      - heading "目录" [level=2] [ref=f2e1239]
+      - text: "[ 隐藏 ]"
+    - list [ref=f2e1240]:
+      - listitem [ref=f2e1241]:
+        - link "1 基本信息" [ref=f2e1242] [cursor=pointer]:
+          - /url: "#基本信息"
+          - generic [ref=f2e1243]: "1"
+          - generic [ref=f2e1244]: 基本信息
+      - listitem [ref=f2e1245]:
+        - link "2 提示" [ref=f2e1246] [cursor=pointer]:
+          - /url: "#提示"
+          - generic [ref=f2e1247]: "2"
+          - generic [ref=f2e1248]: 提示
+      - listitem [ref=f2e1249]:
+        - link "3 场地/光环技能" [ref=f2e1250] [cursor=pointer]:
+          - /url: "#场地/光环技能"
+          - generic [ref=f2e1251]: "3"
+          - generic [ref=f2e1252]: 场地/光环技能
+        - list [ref=f2e1253]:
+          - listitem [ref=f2e1254]:
+            - link "3.1 光环技能一览" [ref=f2e1255] [cursor=pointer]:
+              - /url: "#光环技能一览"
+              - generic [ref=f2e1256]: "3.1"
+              - generic [ref=f2e1257]: 光环技能一览
+          - listitem [ref=f2e1258]:
+            - link "3.2 地脉异常一览" [ref=f2e1259] [cursor=pointer]:
+              - /url: "#地脉异常一览"
+              - generic [ref=f2e1260]: "3.2"
+              - generic [ref=f2e1261]: 地脉异常一览
+      - listitem [ref=f2e1262]:
+        - link "4 介绍" [ref=f2e1263] [cursor=pointer]:
+          - /url: "#介绍"
+          - generic [ref=f2e1264]: "4"
+          - generic [ref=f2e1265]: 介绍
+        - list [ref=f2e1266]:
+          - listitem [ref=f2e1267]:
+            - link "4.1 深境螺旋" [ref=f2e1268] [cursor=pointer]:
+              - /url: "#深境螺旋"
+              - generic [ref=f2e1269]: "4.1"
+              - generic [ref=f2e1270]: 深境螺旋
+          - listitem [ref=f2e1271]:
+            - link "4.2 规则：渊星、间与层" [ref=f2e1272] [cursor=pointer]:
+              - /url: "#规则：渊星、间与层"
+              - generic [ref=f2e1273]: "4.2"
+              - generic [ref=f2e1274]: 规则：渊星、间与层
+          - listitem [ref=f2e1275]:
+            - link "4.3 规则：深境回廊与渊月螺旋" [ref=f2e1276] [cursor=pointer]:
+              - /url: "#规则：深境回廊与渊月螺旋"
+              - generic [ref=f2e1277]: "4.3"
+              - generic [ref=f2e1278]: 规则：深境回廊与渊月螺旋
+          - listitem [ref=f2e1279]:
+            - link "4.4 规则：限制与地脉异常" [ref=f2e1280] [cursor=pointer]:
+              - /url: "#规则：限制与地脉异常"
+              - generic [ref=f2e1281]: "4.4"
+              - generic [ref=f2e1282]: 规则：限制与地脉异常
+          - listitem [ref=f2e1283]:
+            - link "4.5 规则：祝福与降福" [ref=f2e1284] [cursor=pointer]:
+              - /url: "#规则：祝福与降福"
+              - generic [ref=f2e1285]: "4.5"
+              - generic [ref=f2e1286]: 规则：祝福与降福
+          - listitem [ref=f2e1287]:
+            - link "4.6 规则：路径分叉" [ref=f2e1288] [cursor=pointer]:
+              - /url: "#规则：路径分叉"
+              - generic [ref=f2e1289]: "4.6"
+              - generic [ref=f2e1290]: 规则：路径分叉
+          - listitem [ref=f2e1291]:
+            - link "4.7 规则：渊月螺旋敌人生命倍率和敌人等级" [ref=f2e1292] [cursor=pointer]:
+              - /url: "#规则：渊月螺旋敌人生命倍率和敌人等级"
+              - generic [ref=f2e1293]: "4.7"
+              - generic [ref=f2e1294]: 规则：渊月螺旋敌人生命倍率和敌人等级
+          - listitem [ref=f2e1295]:
+            - link "4.8 规则：奖励与重置" [ref=f2e1296] [cursor=pointer]:
+              - /url: "#规则：奖励与重置"
+              - generic [ref=f2e1297]: "4.8"
+              - generic [ref=f2e1298]: 规则：奖励与重置
+            - list [ref=f2e1299]:
+              - listitem [ref=f2e1300]:
+                - link "4.8.1 间之秘宝" [ref=f2e1301] [cursor=pointer]:
+                  - /url: "#间之秘宝"
+                  - generic [ref=f2e1302]: 4.8.1
+                  - generic [ref=f2e1303]: 间之秘宝
+              - listitem [ref=f2e1304]:
+                - link "4.8.2 星之秘宝" [ref=f2e1305] [cursor=pointer]:
+                  - /url: "#星之秘宝"
+                  - generic [ref=f2e1306]: 4.8.2
+                  - generic [ref=f2e1307]: 星之秘宝
+      - listitem [ref=f2e1308]:
+        - link "5 调整历史" [ref=f2e1309] [cursor=pointer]:
+          - /url: "#调整历史"
+          - generic [ref=f2e1310]: "5"
+          - generic [ref=f2e1311]: 调整历史
+    - text: 显示目录>
