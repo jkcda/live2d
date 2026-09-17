@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 
 from fastapi import FastAPI, HTTPException, WebSocket
@@ -105,6 +107,56 @@ async def stream(ws: WebSocket) -> None:
 @app.get("/voices")
 async def voices() -> dict:
     return {"engine": engine.name, "voices": engine.voices()}
+
+
+class VoiceRequest(BaseModel):
+    """新增克隆音色。音频走 base64 而不是 multipart —— 省掉 python-multipart 依赖。"""
+
+    name: str = Field(..., min_length=1, max_length=40)
+    text: str = Field(..., min_length=1, description="参考音频里说的话，必须逐字一致")
+    wav_base64: str = Field(..., min_length=16)
+
+
+@app.post("/voices")
+async def add_voice(req: VoiceRequest) -> dict:
+    """注册一个新的克隆音色。
+
+    ★ 为什么放在这里、而不是让界面直接连模型服务（8788）：
+      应用只该认识**一个** TTS 地址。多记一个端口就多一处会配错的地方，
+      而且报错信息会变得难懂（"连不上 8788" 对用户毫无意义）。
+      引擎不支持时明确返回 501 —— 比如 edge / sapi 根本没有音色克隆这回事，
+      界面据此把「克隆」那块藏起来，而不是让用户点了没反应。
+    """
+    if not hasattr(engine, "add_voice"):
+        raise HTTPException(
+            status_code=501,
+            detail=f"当前引擎（{engine.name}）不支持克隆音色 —— 它是固定音色的引擎",
+        )
+    try:
+        new_voices = await asyncio.to_thread(engine.add_voice, req.name, req.text, req.wav_base64)
+    except Exception as err:  # noqa: BLE001
+        detail = str(err)
+        # urllib 的 HTTPError 里带着模型服务给的原因（"音频太短"之类），抠出来给用户看
+        body = getattr(err, "read", None)
+        if body:
+            try:
+                detail = json.loads(body().decode("utf-8")).get("detail", detail)
+            except Exception:  # noqa: BLE001
+                pass
+        log.warning("注册音色失败：%s —— %s", req.name, detail)
+        raise HTTPException(status_code=400, detail=f"注册失败：{detail}") from err
+    return {"ok": True, "engine": engine.name, "voices": new_voices}
+
+
+@app.delete("/voices/{name}")
+async def remove_voice(name: str) -> dict:
+    if not hasattr(engine, "remove_voice"):
+        raise HTTPException(status_code=501, detail=f"当前引擎（{engine.name}）不支持删除音色")
+    try:
+        new_voices = await asyncio.to_thread(engine.remove_voice, name)
+    except Exception as err:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"删除失败：{err}") from err
+    return {"ok": True, "voices": new_voices}
 
 
 @app.post("/tts")

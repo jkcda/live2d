@@ -134,6 +134,9 @@ onMounted(() => {
     packs.value = await listCharacterPacks()
     syncCharacterUI()
   })
+
+  // 音色列表：服务可能还没起来，读不到就只是没有下拉可选（不影响其它设置）
+  void loadVoices()
 })
 
 /*
@@ -259,6 +262,116 @@ async function trialTTS() {
     ttsTest.value = `失败：${err instanceof Error ? err.message : String(err)}`
   }
 }
+
+// ---------------------------------------------------------------- 音色管理
+
+/**
+ * 音色列表 + 克隆。
+ *
+ * 为什么要做进界面：声音这块以前只有命令行能操作（放文件、写 txt、重启服务），
+ * 而"音色"恰恰是最需要**当场试**的东西 —— 录完一段、点一下、立刻听到像不像，
+ * 这个闭环不该跨三个终端。
+ *
+ * 「能不能克隆」是**问服务**得出的（主服务对 edge/sapi 返回 501），
+ * 不是本地写死的判断 —— 换引擎时界面自动跟着变。
+ */
+const voiceList = ref<string[]>([])
+const voicesBusy = ref(false)
+const canCloneVoice = ref(false)
+const voiceFile = ref<File | null>(null)
+const newVoiceName = ref('')
+const newVoiceText = ref('')
+const voiceBusy = ref(false)
+const voiceMsg = ref('')
+
+/** 读服务端有哪些音色；顺便探出"这个引擎支不支持克隆" */
+async function loadVoices() {
+  const url = ttsURL.value.trim()
+  if (!url) return
+  voicesBusy.value = true
+  try {
+    const resp = await fetch(`${url.replace(/\/+$/, '')}/voices`, {
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data = (await resp.json()) as { engine?: string; voices?: string[] }
+    voiceList.value = data.voices ?? []
+    canCloneVoice.value = /cosy/i.test(data.engine ?? '')
+    if (!voiceList.value.includes(ttsVoice.value) && voiceList.value.length) {
+      ttsVoice.value = voiceList.value[0]
+    }
+    voiceMsg.value = ''
+  } catch (err) {
+    // 读不到不算错：服务没起来时面板其余部分照样能用，只是没有下拉可选
+    voiceMsg.value = `读不到音色列表（服务没起？）：${err instanceof Error ? err.message : err}`
+    canCloneVoice.value = false
+  } finally {
+    voicesBusy.value = false
+  }
+}
+
+function onVoiceFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  voiceFile.value = input.files?.[0] ?? null
+  if (voiceFile.value && !newVoiceName.value) {
+    // 用文件名当默认名字，省一步输入（用户想改再改）
+    newVoiceName.value = voiceFile.value.name.replace(/\.[^.]+$/, '').replace(/[^\w-]/g, '')
+  }
+}
+
+/**
+ * 上传参考音频并注册。
+ *
+ * 音频走 base64：省掉 multipart（服务端就少一个 python-multipart 依赖），
+ * 10 秒的 wav 大约 2~3MB，本机回环传起来没感觉。
+ */
+async function addVoice() {
+  const file = voiceFile.value
+  const name = newVoiceName.value.trim()
+  const text = newVoiceText.value.trim()
+  const url = ttsURL.value.trim()
+  if (!file || !url) return
+  if (!name) {
+    voiceMsg.value = '先给它起个名字'
+    return
+  }
+  if (text.length < 4) {
+    voiceMsg.value = '把录音里说的那句话填上（必须逐字一致，否则音色会飘）'
+    return
+  }
+
+  voiceBusy.value = true
+  voiceMsg.value = '读取音频…'
+  try {
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(new Error('读文件失败'))
+      reader.readAsDataURL(file)
+    })
+
+    voiceMsg.value = '注册中（模型要在 GPU 上跑一遍编码，约 1 秒）…'
+    const resp = await fetch(`${url.replace(/\/+$/, '')}/voices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, text, wav_base64: base64 }),
+      signal: AbortSignal.timeout(120_000),
+    })
+    const data = (await resp.json().catch(() => ({}))) as { voices?: string[]; detail?: string }
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`)
+
+    voiceList.value = data.voices ?? voiceList.value
+    ttsVoice.value = name
+    persistNow() // 立刻选中它并落盘，用户下一步就是"试听"
+    voiceFile.value = null
+    newVoiceText.value = ''
+    voiceMsg.value = `音色「${name}」已就绪 —— 点上面的「试听」听听像不像`
+  } catch (err) {
+    voiceMsg.value = `失败：${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    voiceBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -363,7 +476,19 @@ async function trialTTS() {
 
         <label>
           <span>音色</span>
-          <input v-model="ttsVoice" spellcheck="false" placeholder="default" />
+          <span class="voice-row">
+            <select v-if="voiceList.length" v-model="ttsVoice">
+              <option v-for="v in voiceList" :key="v" :value="v">{{ v }}</option>
+              <!-- 列表里没有但用户手填过的名字（比如还没刷新的）也要能选 -->
+              <option v-if="ttsVoice && !voiceList.includes(ttsVoice)" :value="ttsVoice">
+                {{ ttsVoice }}（手填）
+              </option>
+            </select>
+            <input v-else v-model="ttsVoice" spellcheck="false" placeholder="default" />
+            <button class="btn small" :disabled="voicesBusy" @click="loadVoices">
+              {{ voicesBusy ? '读取中…' : '刷新' }}
+            </button>
+          </span>
         </label>
 
         <label>
@@ -376,6 +501,41 @@ async function trialTTS() {
           <button class="btn" @click="trialTTS">试听</button>
           <span class="hint">{{ ttsTest }}</span>
         </div>
+
+        <!--
+          克隆音色：只有在引擎真的支持时才出现（主服务对 edge/sapi 返回 501）。
+          为什么做成"上传一个 wav + 填它说了什么"，而不是让用户去放文件：
+          参考音频和它的文字必须**成对**给出，而且要逐字一致 ——
+          这两件事分开做（放文件、再开记事本写 txt）太容易错，界面把它们绑在一起。
+        -->
+        <template v-if="canCloneVoice">
+          <p class="note">
+            克隆一个新音色：录 5~10 秒念一句话（内容自己定），把音频选进来、把那句话
+            <strong>逐字</strong>填在下面。内容和音频不一致音色会飘。
+          </p>
+
+          <label>
+            <span>参考音频</span>
+            <input type="file" accept="audio/*,.wav,.mp3,.m4a" @change="onVoiceFile" />
+          </label>
+
+          <label>
+            <span>名字</span>
+            <input v-model="newVoiceName" spellcheck="false" placeholder="例如 mine（字母数字）" />
+          </label>
+
+          <label>
+            <span>录音里说的那句</span>
+            <textarea v-model="newVoiceText" rows="2" placeholder="例：今天天气不错，要不要一起出去走走"></textarea>
+          </label>
+
+          <div class="actions">
+            <button class="btn" :disabled="voiceBusy || !voiceFile" @click="addVoice">
+              {{ voiceBusy ? '注册中（约 1 秒）…' : '添加这个音色' }}
+            </button>
+            <span class="hint">{{ voiceMsg }}</span>
+          </div>
+        </template>
       </section>
     </div>
 
@@ -520,6 +680,39 @@ select {
 select {
   /* 下拉里的选项由系统绘制，不设背景会出现白底黑字和其他控件不一致 */
   background-color: #24242a;
+}
+
+/* 音色那一行：下拉占满，刷新按钮贴右边 */
+.voice-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+.voice-row select,
+.voice-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ec;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 9px;
+  outline: none;
+  resize: vertical;
+}
+
+input[type='file'] {
+  font-size: 11px;
+  color: #a0a0aa;
 }
 
 input:focus,

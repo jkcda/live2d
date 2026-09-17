@@ -164,6 +164,89 @@ def voices() -> dict:
     return {"engine": "cosyvoice2", "voices": list(registered)}
 
 
+class VoiceRequest(BaseModel):
+    """新增音色。wav 用 base64 传 —— 省掉 multipart 解析（少一个依赖）。
+
+    10 秒的 WAV 约 1~2MB，base64 之后 2~3MB，本机回环一次性传完没有压力。
+    """
+
+    name: str = Field(..., min_length=1, max_length=40)
+    text: str = Field(..., min_length=1, description="这段录音里说的话，必须逐字一致")
+    wav_base64: str = Field(..., min_length=16)
+
+
+@app.post("/voices")
+def add_voice(req: VoiceRequest) -> dict:
+    """运行时注册一个新音色 —— **不用重启服务**。
+
+    为什么重要：重启要重新加载模型（10~15 秒）。而 add_zero_shot_spk 本身只要 0.35 秒，
+    完全可以当场注册。用户录完音、填上文字，点一下就能立刻听到自己的声音。
+    """
+    import base64
+    import re
+
+    if model is None:
+        raise HTTPException(status_code=503, detail="模型还没加载完")
+
+    name = re.sub(r"[^\w\-]", "", req.name.strip())[:40]
+    if not name:
+        raise HTTPException(status_code=400, detail="名字只能是字母/数字/下划线/连字符")
+
+    VOICES_DIR.mkdir(parents=True, exist_ok=True)
+    wav_path = VOICES_DIR / f"{name}.wav"
+    try:
+        raw = base64.b64decode(req.wav_base64.split(",")[-1], validate=True)
+    except Exception as err:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"音频不是合法的 base64：{err}") from err
+
+    if len(raw) < 1000:
+        raise HTTPException(status_code=400, detail="音频太短了（至少得有一两秒）")
+    wav_path.write_bytes(raw)
+    wav_path.with_suffix(".txt").write_text(req.text.strip(), encoding="utf-8")
+
+    try:
+        with _lock:
+            model.add_zero_shot_spk(req.text.strip(), str(wav_path), name)
+    except Exception as err:  # noqa: BLE001
+        wav_path.unlink(missing_ok=True)
+        wav_path.with_suffix(".txt").unlink(missing_ok=True)
+        log.exception("注册音色失败：%s", name)
+        raise HTTPException(
+            status_code=400,
+            detail=f"注册失败：{err}。常见原因：参考音频太短/太长，或者音频不是语音",
+        ) from err
+
+    registered[name] = str(wav_path)
+    try:
+        model.save_spkinfo()
+    except Exception:  # noqa: BLE001
+        pass
+    log.info("已注册音色 %s（来自界面）｜当前：%s", name, ", ".join(registered))
+    return {"ok": True, "name": name, "voices": list(registered)}
+
+
+@app.delete("/voices/{name}")
+def delete_voice(name: str) -> dict:
+    """删掉一个音色（连同它的参考音频文件）。"""
+    if name not in registered:
+        raise HTTPException(status_code=404, detail=f"没有这个音色：{name}")
+
+    path = Path(registered.pop(name))
+    if VOICES_DIR in path.parents:
+        path.unlink(missing_ok=True)
+        path.with_suffix(".txt").unlink(missing_ok=True)
+    if model is not None and name in getattr(model.frontend, "spk2info", {}):
+        del model.frontend.spk2info[name]
+    if not registered:
+        # 一个都不剩就退回自带示例，免得服务处于"没有音色"的状态
+        if model is not None:
+            model.add_zero_shot_spk(FALLBACK_PROMPT_TEXT, str(FALLBACK_PROMPT_WAV), "default")
+            registered["default"] = str(FALLBACK_PROMPT_WAV)
+
+    log.info("已删除音色 %s｜当前：%s", name, ", ".join(registered))
+    return {"ok": True, "voices": list(registered)}
+
+
 @app.post("/tts")
 def tts(req: TTSRequest) -> Response:
     if model is None:

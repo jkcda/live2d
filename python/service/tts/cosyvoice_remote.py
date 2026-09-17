@@ -81,6 +81,36 @@ class CosyVoiceRemoteEngine(TTSEngine):
             self.availability()
         return list(self._voices)
 
+    # ---- 音色管理（界面用；别的引擎没有这个能力，所以是可选方法） ----
+
+    def add_voice(self, name: str, text: str, wav_base64: str) -> list[str]:
+        """把参考音频交给模型服务，**当场注册**（不用重启）。
+
+        为什么要绕一圈经主服务：应用只认识一个 TTS 地址（8765）。
+        让它再去记一个 8788 只会多一处会配错的地方。
+        """
+        import json
+        import urllib.request
+
+        payload = json.dumps({"name": name, "text": text, "wav_base64": wav_base64}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self._url}/voices", data=payload, headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        self._voices = list(data.get("voices") or [])
+        return list(self._voices)
+
+    def remove_voice(self, name: str) -> list[str]:
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(f"{self._url}/voices/{name}", method="DELETE")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        self._voices = list(data.get("voices") or [])
+        return list(self._voices)
+
     async def synthesize(self, text: str, voice: str, speed: float) -> bytes:
         import asyncio
         import json
