@@ -275,12 +275,51 @@ try {
   )
 
   // 这一轮的截图：直接问主进程要（和真实对话走同一条 IPC）
+  const t0 = Date.now()
   const frame = await ev('window.nexus.screenForTurn()')
+  const frameMs = Date.now() - t0
   check(
     '① 主进程给得出一张可以附的图',
     Boolean(frame && frame.dataUrl?.startsWith('data:image/jpeg;base64,')),
     frame ? `${frame.width}x${frame.height}，${(frame.dataUrl.length / 1024).toFixed(0)} KB base64，${frame.ageSeconds} 秒前抓的` : '拿到了 null',
   )
+  /*
+   * ★ 零延迟是硬要求，不是"最好能快"。
+   *   抓一次图要 100~300ms（desktopCapturer 要把整屏渲染成全分辨率位图再编码），
+   *   如果它卡在"他按下回车"和"请求发出去"之间，每一句回复都会慢一截 ——
+   *   用户的第一反应就是"回复也变慢了很多"。
+   *   所以这里必须命中后台预热好的缓存，只做一次内存读取。
+   */
+  check('   取图不阻塞这一轮（走后台缓存，不现场抓）', frameMs < 30, `${frameMs}ms`)
+
+  /*
+   * 参考值：现场抓一张要多久。
+   * 这不是断言，是把"挪出去的那笔钱"量出来给读者看 ——
+   * 原来这一笔就卡在"他按下回车"和"请求发出去"之间。
+   */
+  const tLive = Date.now()
+  await ev('window.nexus.captureScreen(true)')
+  console.log(`     参考：现场抓一张要 ${Date.now() - tLive}ms（getSources 整屏 + 编码）`)
+
+  /*
+   * ★ 这一条是用户真正踩到的坑：**前台是她自己的窗口**。
+   *
+   * 对话面板要能打键盘，主进程在面板打开时会 focus() —— 所以"他问她你在看什么"
+   * 的那一刻，前台窗口恰恰是她自己。截图只认实时前台的话，真实使用里一张图
+   * 都送不出去（症状就是"她只能说出窗口标题"）。
+   */
+  await ev('window.nexus.setPanelOpen(true)')
+  await sleep(1500)
+  const selfFrame = await ev('window.nexus.screenForTurn()')
+  check(
+    '①b 前台是她自己时，仍拿得到「最后一个可看窗口」那张图',
+    Boolean(selfFrame && selfFrame.dataUrl?.startsWith('data:image/jpeg')),
+    selfFrame
+      ? `${selfFrame.width}x${selfFrame.height}，${selfFrame.ageSeconds} 秒前`
+      : '拿到了 null —— 真实使用里她就是这样"只看得见标题"的',
+  )
+  await ev('window.nexus.setPanelOpen(false)')
+  await sleep(300)
 
   // 真的发一轮对话
   const turn = await ev(`(async () => {
@@ -297,7 +336,18 @@ try {
   console.log(`     她这一轮调的工具：${turn.tools.length ? turn.tools.join(', ') : '（没调）'}`)
 
   // 看模型到底收到了什么
-  const last = await (await fetch(`http://127.0.0.1:${STUB_PORT}/_last`)).json()
+  /*
+   * ★ 要在一串请求里挑出「这一轮对话」那条，不能只看最后一条：
+   *   agent 会在后台调模型做记忆整理 / 历史压缩，那些请求会盖在后面
+   *   （第一次跑就撞上了：拿到的是"你是她的记忆管理器"那条）。
+   *   判据：带 tools 的那条就是对话（后台那两条都不带工具）。
+   */
+  const all = await (await fetch(`http://127.0.0.1:${STUB_PORT}/_all`)).json()
+  const list = Array.isArray(all) ? all : []
+  const last =
+    [...list].reverse().find((r) => Array.isArray(r?.tools)) ??
+    [...list].reverse().find((r) => JSON.stringify(r?.messages ?? '').includes('你看我在干嘛')) ??
+    list[list.length - 1]
   const msgs = Array.isArray(last?.messages) ? last.messages : []
   const lastUser = [...msgs].reverse().find((m) => m.role === 'user')
   const blocks = Array.isArray(lastUser?.content) ? lastUser.content : []

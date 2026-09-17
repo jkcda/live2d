@@ -301,6 +301,8 @@ export function isObservable(fg: ForegroundWindow): boolean {
 export class ActivityObserver {
   private timer: NodeJS.Timeout | null = null
   private current: Activity | null = null
+  /** 最后一个可看窗口（含矩形）—— 截图那条路用它，见 lastWindow() */
+  private lastObservable: ForegroundWindow | null = null
   private lastChangeAt = 0
   private _paused = false
 
@@ -316,8 +318,9 @@ export class ActivityObserver {
   setPaused(paused: boolean): void {
     this._paused = paused
     if (paused) {
-      // 暂停时立刻清掉，别留着上一次的快照被读到
+      // 暂停时立刻清掉，别留着上一次的快照被读到（截图那条路也一样）
       this.current = null
+      this.lastObservable = null
     }
     console.log(`[observer] 观察${paused ? '已暂停' : '已恢复'}`)
   }
@@ -339,11 +342,31 @@ export class ActivityObserver {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.current = null
+    this.lastObservable = null
   }
 
   /** 当前活动快照。暂停中、命中黑名单、或读不到时返回 null */
   snapshot(): Activity | null {
     return this.current
+  }
+
+  /**
+   * 最后一个「可以看」的窗口（含矩形）。
+   *
+   * ★ 为什么截图这条路上必须有它
+   *
+   * 他问「你在看什么」的那一刻，**前台窗口恰恰是她自己** —— 对话面板要能打键盘，
+   * 主进程在面板打开时会 focus()。如果截图只认「当前前台窗口」，
+   * 那真实使用里一张图都送不出去（实测就是这样：她只能看到窗口标题，
+   * 因为 activity 还留着上一个窗口，而图根本抓不到）。
+   *
+   * 所以记住最后一个通过了 isObservable 的窗口：
+   *   · 它在成为前台时就已经过完黑名单那套判断；
+   *   · 命中敏感窗口时这里会被**清掉**（和 current 一样），
+   *     不会出现"绕过去看一眼上一个窗口"。
+   */
+  lastWindow(): ForegroundWindow | null {
+    return this.lastObservable
   }
 
   private tick(): void {
@@ -366,12 +389,19 @@ export class ActivityObserver {
     if (!isObservable(fg)) {
       // 黑名单命中时要把 current 清掉（否则她会一直以为他还在那个敏感窗口）；
       // 但「是应用自己」不清 —— 两种情况的处理不一样，所以分开判
-      if (blocklist.has(fg.process, fg.title) && this.current !== null) {
-        this.current = null
-        console.log('[observer] 前台窗口命中屏蔽规则，已隐藏')
+      if (blocklist.has(fg.process, fg.title)) {
+        if (this.current !== null) {
+          this.current = null
+          console.log('[observer] 前台窗口命中屏蔽规则，已隐藏')
+        }
+        // 截图那条路也要一起忘掉：他刚看过敏感窗口，就别再拿上一个窗口的图给她
+        this.lastObservable = null
       }
       return
     }
+
+    // 可看的窗口：每次都更新（窗口拖动/换页也要跟着），截图靠它定位
+    this.lastObservable = fg
 
     const title = fg.title.slice(0, MAX_TITLE_LEN)
     const processName = fg.process

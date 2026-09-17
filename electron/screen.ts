@@ -140,8 +140,28 @@ export async function captureForeground(): Promise<ScreenFrame | null> {
   // 没有有效矩形（最小化之类）就不截 —— 硬裁会截到桌面左上角那块无关内容
   if (!fg.rect) return null
 
+  return captureRect(fg.rect)
+}
+
+/**
+ * 抓指定矩形那一块屏幕（物理像素）。
+ *
+ * ★ 为什么要有「指定矩形」这一条路
+ *
+ * 「他问她你在看什么」的那一刻，**前台窗口恰恰是她自己**（对话面板要能打键盘），
+ * 所以那一轮的矩形得由调用方给：用观察器记住的**最后一个可看窗口**
+ * （见 observer.lastWindow()）。只认实时前台的话，真实使用里一张图都送不出去。
+ *
+ * 矩形该不该给、给谁的，由调用方判（判断和裁剪仍然是同一条链上的同一份数据）；
+ * 这里只负责"把这块屏幕抓下来"。
+ */
+export async function captureRect(physRect: {
+  x: number
+  y: number
+  width: number
+  height: number
+}): Promise<ScreenFrame | null> {
   // GetWindowRect 给的是物理像素，Electron 的 screen API 用 DIP，先转
-  const physRect = fg.rect
   const dipRect = screen.screenToDipRect(null, physRect)
   const display = screen.getDisplayMatching(dipRect)
 

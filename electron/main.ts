@@ -12,8 +12,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // node16 模块解析要求显式扩展名 —— 写 .js，即使源文件是 .ts
 import { isSupported as nativeStyleSupported, setNoActivate } from './win-style.js'
-import { ActivityObserver, activitySnapshot } from './observer.js'
-import { captureForeground, ScreenGate, type ScreenFrame } from './screen.js'
+import { ActivityObserver, activitySnapshot, foregroundWindow, isObservable } from './observer.js'
+import { captureForeground, captureRect, ScreenGate, type ScreenFrame } from './screen.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -73,9 +73,10 @@ const observer = new ActivityObserver()
 const screenGate = new ScreenGate()
 
 /**
- * 最近一张被门控接受的截图（**只留一帧**，见 screen.ts 的生命周期契约）。
+ * 最近一张抓好的截图（**只留一帧**，见 screen.ts 的生命周期契约）。
  *
- * 门控拦下新一轮抓图时，这一帧就是"他此刻屏幕上大概还是这样"。
+ * 为什么主进程要留一帧、而且**提前**抓好：见 warmScreen() 的注释 ——
+ * 简单说就是"抓图那 100~300ms 不能卡在他和请求之间"。
  */
 let lastFrame: ScreenFrame | null = null
 
@@ -86,6 +87,89 @@ let lastFrame: ScreenFrame | null = null
  * 比让她说"我看看"要糟得多。
  */
 const FRAME_MAX_AGE_MS = 30_000
+
+/** 缓存超过这个时间就允许重新抓（同一个窗口里内容也会变，比如翻页、滚动） */
+const SCREEN_REFRESH_MS = 15_000
+
+/** 上一次预热用的矩形，用来判断"窗口是不是换了/动了" */
+let lastWarmedKey = ''
+let warmTimer: NodeJS.Timeout | null = null
+let warming = false
+
+/**
+ * 这一轮该抓哪块屏幕。
+ *
+ * ★ 前台是她自己时，用观察器记住的**最后一个可看窗口**。
+ *
+ * 他问「你在看什么」的那一刻，前台窗口恰恰是她自己（面板要能打键盘），
+ * 所以只认实时前台的话，真实使用里一张图都送不出去 —— 实测就是这样：
+ * 她只能说出窗口标题，图根本抓不到。
+ */
+function screenTargetRect(): { x: number; y: number; width: number; height: number } | null {
+  const fg = foregroundWindow()
+  if (fg && fg.rect && isObservable(fg)) return fg.rect
+  return observer.lastWindow()?.rect ?? null
+}
+
+/**
+ * 后台预热：把"这一轮可能要用到的截图"先抓好，发请求时直接用缓存。
+ *
+ * ★ 为什么不能等到发请求那一刻再抓
+ *
+ * 抓一次图要 100~300ms（desktopCapturer 会把整块屏渲染成全分辨率位图再编码），
+ * 而它正好卡在「他按下回车」和「请求发出去」之间 —— 表现就是
+ * **每一句回复都慢了一截**（用户的原话："回复也变慢了很多"）。
+ *
+ * 预热是事件驱动的：窗口换了（矩形变了）或者缓存超过 15 秒才抓一次，
+ * 平时什么都不做。
+ */
+async function warmScreen(): Promise<void> {
+  if (warming || !win || observer.paused || !win.isVisible()) return
+
+  const rect = screenTargetRect()
+  if (!rect) return
+
+  const key = `${rect.x},${rect.y},${rect.width}x${rect.height}`
+  const fresh = lastFrame !== null && Date.now() - lastFrame.at < SCREEN_REFRESH_MS
+  if (key === lastWarmedKey && fresh) return
+
+  warming = true
+  let hidden = false
+  try {
+    /*
+     * 她自己的窗口正压在这块区域上时，先把自己藏起来再抓。
+     *
+     * 不算这一步的话图里会有她自己（她永远置顶），
+     * 模型会看到"画面角上有个女孩"，很怪。
+     * 只在**真的重叠**时才藏 —— 大多数时候她那一小块不挡事，不需要闪。
+     */
+    const phys = screen.dipToScreenRect(null, win.getBounds())
+    const overlaps =
+      phys.x < rect.x + rect.width &&
+      rect.x < phys.x + phys.width &&
+      phys.y < rect.y + rect.height &&
+      rect.y < phys.y + phys.height
+
+    if (overlaps) {
+      win.setOpacity(0)
+      hidden = true
+      // 让这一帧先真的不可见再抓（否则抓到的还是上一帧合成结果）
+      await new Promise((done) => setTimeout(done, 60))
+    }
+
+    const frame = await captureRect(rect)
+    if (frame) {
+      lastFrame = frame
+      lastWarmedKey = key
+    }
+  } catch (err) {
+    console.warn('[screen] 预热失败：', err instanceof Error ? err.message : err)
+  } finally {
+    // 无论如何都要把她显示回来 —— 绝不能因为一次抓图失败让她隐形
+    if (hidden && win && !win.isDestroyed()) win.setOpacity(1)
+    warming = false
+  }
+}
 
 /**
  * 允许渲染层用 `force` 绕过变化门控。
@@ -467,36 +551,26 @@ ipcMain.handle('screen:capture', async (_e, force = false) => {
 /**
  * 取一张「这一轮可以附给她的」截图。
  *
- * ── 和 screen:capture 的分工 ──
+ * ★ 这里**不抓图**，只拿后台预热好的那张。
  *
- * `screen:capture` 是验证用的「抓一张」：门控拦下就是 null，语义干净。
- * 这条是给**对话**用的，多两件事：
+ * 抓图要 100~300ms，正好卡在"他按下回车"和"请求发出去"之间 ——
+ * 之前就是这么写的，用户的第一反应是"回复变慢了很多"。
+ * 现在抓图在后台（warmScreen），这里只做一次内存读取，零延迟。
  *
- *   1. **门控拦下时退回最近一帧**（并带上年龄）。
- *      门控的判据是「画面没怎么变就别再送一张」，可「他问她你在看什么」这一刻
- *      往往正好就是没变的时候 —— 没变恰恰说明上次那张还是准的。
- *      年龄必须一起给她：她得知道这是「几秒前」而不是「此刻」。
- *   2. **暂停开关**照旧先判（和 capture 一样）。
- *
- * 只留一帧是刻意的：一帧 base64 几百 KB，攒起来就是"越堆越多最后炸掉"，
- * 见 screen.ts 顶部的生命周期契约。
+ * 代价是这一帧可能比"此刻"旧十几秒 —— 所以 ageSeconds 一定会带上，
+ * 她那边的文字里会写明"这是几秒前抓的"（见 agent 的 userContent）。
+ * 超过 FRAME_MAX_AGE_MS 就宁可不给：让她描述一张过时的画面比不给更糟。
  */
-ipcMain.handle('screen:forTurn', async () => {
+ipcMain.handle('screen:forTurn', () => {
   if (observer.paused) return null
 
-  // captureForeground 内部已经过了 isObservable（黑名单 + 不是她自己），
-  // 而且是**一次读**的前台窗口 —— 这里不要再判一遍，两处名单迟早不同步
-  const frame = await captureForeground()
-  if (!frame) return null
-
-  if (screenGate.accept(frame)) {
-    lastFrame = frame
-  } else if (!lastFrame || Date.now() - lastFrame.at > FRAME_MAX_AGE_MS) {
-    // 画面没变、而且手上那张已经太旧 —— 宁可这次不给图，也别让她描述过时的画面
+  const f = lastFrame
+  if (!f || Date.now() - f.at > FRAME_MAX_AGE_MS) {
+    // 手上没有能用的 —— 让后台去补一张，但**不阻塞这一轮**
+    void warmScreen()
     return null
   }
 
-  const f = lastFrame ?? frame
   return {
     dataUrl: f.dataUrl,
     width: f.width,
@@ -554,6 +628,15 @@ app.whenReady().then(() => {
   if (observer.available) {
     observer.start()
     console.log('[main] 前台窗口观察已启动（默认开启；托盘菜单可暂停）')
+
+    /*
+     * 截图预热：每秒看一次"该不该补一张"，只在窗口换了或缓存过期时才真的抓。
+     * 为什么放在主进程而不是渲染层：抓图要上百毫秒，放在发请求那一刻
+     * 就是"每一句回复都慢一截"。
+     */
+    void warmScreen()
+    warmTimer = setInterval(() => void warmScreen(), 1000)
+    warmTimer.unref?.()
   } else {
     console.warn('[main] 前台窗口观察不可用（非 Windows 或 koffi 加载失败）')
   }
@@ -564,6 +647,8 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   observer.stop()
   stopIslandWatch()
+  if (warmTimer) clearInterval(warmTimer)
+  warmTimer = null
   globalShortcut.unregisterAll()
   tray?.destroy()
   tray = null

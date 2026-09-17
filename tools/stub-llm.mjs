@@ -14,13 +14,26 @@ import { createServer } from 'node:http'
 const PORT = Number(process.argv[2] || 8799)
 const REPLY = '我看到了，你在跟验证脚本打交道。'
 
-/** 最近一次请求体。验证脚本靠它断言"模型到底收到了什么" */
-let last = null
+/** 最近的请求体。验证脚本靠它断言"模型到底收到了什么" */
+const requests = []
+const MAX_KEPT = 20
 
 const server = createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/_last') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify(last))
+    res.end(JSON.stringify(requests[requests.length - 1] ?? null))
+    return
+  }
+  /*
+   * ★ 为什么要留一整串，而不是只留最后一条
+   *
+   * agent 除了对话，还会**在后台**调模型（记忆整理、历史压缩用的是同一个
+   * LLM 配置）。只留最后一条的话，验证脚本很可能拿到那条后台请求 ——
+   * 表现是"图没送到"，其实只是看错了请求（第一次跑就撞上了）。
+   */
+  if (req.method === 'GET' && req.url === '/_all') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(requests))
     return
   }
   if (req.method !== 'POST') {
@@ -33,10 +46,11 @@ const server = createServer((req, res) => {
   req.on('data', (c) => (body += c))
   req.on('end', () => {
     try {
-      last = JSON.parse(body)
+      requests.push(JSON.parse(body))
     } catch {
-      last = { parseError: true, head: body.slice(0, 300) }
+      requests.push({ parseError: true, head: body.slice(0, 300) })
     }
+    if (requests.length > MAX_KEPT) requests.splice(0, requests.length - MAX_KEPT)
 
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' })
     const chunk = (delta, finish = null) =>

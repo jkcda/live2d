@@ -43,6 +43,23 @@ async function currentActivity(): Promise<ActivitySnapshot | null> {
 }
 
 /**
+ * 这一句是不是在问「你看得见什么」。
+ *
+ * ★ 为什么要判这一下，而不是每轮都塞图
+ *
+ * 两个理由，都是实测换来的：
+ *   1. **慢**。请求里带一张图，模型那边要多做一次视觉编码、多算一千多个 token，
+ *      首字延迟肉眼可见地变长（用户的原话："回复也变慢了很多"）。
+ *   2. 这也是他们原本的设计意图：每轮都塞一张差不多的图，会让模型开始无视它。
+ *
+ * 判据故意放宽 —— 误判的代价只是"这一轮多带了一张图"，不是答错。
+ * 但真正想看的时候（"你看我在干嘛"）必须命中。
+ */
+function needsScreen(text: string): boolean {
+  return /(看|屏幕|画面|桌面|这个|那个|刚才|在干嘛|干什么|做什么|忙什么)/.test(text)
+}
+
+/**
  * 取一张这一轮要附给她的屏幕截图。
  *
  * ★ 图**只挂在这一条消息上，绝不进历史**。
@@ -54,7 +71,8 @@ async function currentActivity(): Promise<ActivitySnapshot | null> {
  * 同理「永远不抛」：看屏幕是锦上添花，不能因为它把整轮对话搞挂。
  * 拿不到就是 null —— 她照样能聊，只是少一张图。
  */
-async function currentScreen(): Promise<ScreenForTurn | null> {
+async function currentScreen(text: string): Promise<ScreenForTurn | null> {
+  if (!needsScreen(text)) return null
   try {
     return (await window.nexus?.screenForTurn()) ?? null
   } catch {
@@ -259,8 +277,7 @@ export class ChatSession {
          * 文字描述和画面是同一时刻的。
          */
         const activity = await currentActivity()
-        const screen = activity ? await currentScreen() : null
-
+        const screen = activity ? await currentScreen(text) : null
         for await (const ev of streamAgent({
           url: agentCfg.url,
           // agent 服务自己拼 system（人设 + 记忆 + 时间），所以历史里不带 system
