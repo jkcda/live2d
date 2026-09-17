@@ -22,7 +22,8 @@ import { Router, type Request, type Response } from 'express'
 import { resolveLLM, type LLMOverride } from '../config.js'
 import { runAgent, type AgentContext, type ChatMessage } from '../services/agent.js'
 import { compactHistory, loadCompaction } from '../services/compaction.js'
-import { clearMemory, extractMemory, listMemory, loadMemory } from '../services/memory.js'
+import { clearMemory, afterTurn, distillNow, forgetEntry, memoryStatus } from '../services/memory.js'
+import { appendTurn, clearTranscript } from '../services/transcript.js'
 import { getMcpStatus, mcpToolCounts } from '../services/mcp.js'
 
 export const chatRouter = Router()
@@ -101,25 +102,51 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   }
 
   /*
-   * 记忆提取放**响应之后**（这里已经 res.end 了），不占用户的等待时间。
-   * 它自己会吞掉异常 —— 忘了记一件小事，比这一轮对话出错轻得多。
+   * 一轮结束之后（这里已经 res.end 了，不占用户等待时间）：
+   *   1. **先记账** —— 把这一轮原样写进 jsonl 转录（零 LLM 成本，绝不失败到影响聊天）
+   *   2. **到点才整理** —— 每 N 轮读一段转录窗口提炼记忆（见 memory.ts 的 afterTurn）
+   *
+   * 以前是"每轮问一次模型、只看最近一轮"，既贵又近视；现在这两步分开，
+   * 而且转录本身让"以后想用历史做任何事"都有了底料。
    */
   if (assistantText.trim() && !abort.signal.aborted) {
-    void extractMemory(input, assistantText, llm)
+    appendTurn(sessionId, input, assistantText)
+    afterTurn(sessionId, llm)
   }
 })
 
-chatRouter.get('/memory', (_req, res) => {
+/** 她记得什么（含整理状态 —— 界面上要能看见"到底有没有在记"） */
+chatRouter.get('/memory', (req, res) => {
+  const sessionId = String(req.query.sessionId || 'default').slice(0, 60)
   res.json({
-    files: listMemory(),
-    text: loadMemory(),
-    summary: loadCompaction('default'),
+    ...memoryStatus(sessionId),
+    summary: loadCompaction(sessionId),
   })
 })
 
-chatRouter.post('/memory/clear', (_req, res) => {
+/** 「忘掉这条」 */
+chatRouter.delete('/memory/:index', (req, res) => {
+  const index = Number(req.params.index)
+  if (!Number.isInteger(index) || !forgetEntry(index)) {
+    res.status(404).json({ error: '没有这一条' })
+    return
+  }
+  res.json({ ok: true, ...memoryStatus() })
+})
+
+/** 「立即整理」—— 不想等 4 轮就手动触发一次 */
+chatRouter.post('/memory/distill', async (req, res) => {
+  const body = req.body as { llm?: LLMOverride; sessionId?: string }
+  const sessionId = String(body.sessionId || 'default').slice(0, 60)
+  const result = await distillNow(sessionId, resolveLLM(body.llm))
+  res.json({ ...result, ...memoryStatus(sessionId) })
+})
+
+chatRouter.post('/memory/clear', (req, res) => {
+  const sessionId = String((req.body as { sessionId?: string })?.sessionId || 'default').slice(0, 60)
   clearMemory()
-  res.json({ ok: true })
+  clearTranscript(sessionId)
+  res.json({ ok: true, ...memoryStatus(sessionId) })
 })
 
 chatRouter.get('/tools', (_req, res) => {

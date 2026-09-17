@@ -1,19 +1,24 @@
 /**
- * 持久记忆。
+ * 长期记忆：**从转录里定期提炼出来的结构化条目**。
  *
- * 结构来自 `nexus-desktop/server/src/services/memory.ts`（用户已有项目的 agent 结构），
- * 针对**陪伴**场景改了两处：
+ * 分两层（这是这次重做的核心）：
+ *   转录 `data/transcripts/<sid>.jsonl` —— 原始事实，只追加、不调模型（见 transcript.ts）
+ *   记忆 `data/memory/user.md`        —— 提炼后的条目，**每行一条**，全量注入 system prompt
  *
- *   1. 记住的东西不一样。那边是"用户偏好/技术栈/决策"（工作助手），
- *      这边是"关于指挥官这个人的事"：习惯、近况、他说过的话、约定。
- *   2. 多了 `rememberNow()` —— 给模型一个**主动记**的工具。
- *      自动提取（每轮对话后异步跑一次）负责"顺手记住"，
- *      但有些事是"这句话很重要，现在就记下来"，自动提取会漏。
+ * 为什么从"每轮问一次模型"改成"定期读转录窗口提炼"：
+ *   1. **以前只看最近一轮**：他上周反复提过的事，这周就不被看见了 —— 近视。
+ *      现在喂的是一段窗口（默认最近 20 轮），能看见"他一直在提什么"。
+ *   2. **以前每轮都调模型**：又贵又容易抖，同一件事被反复改写。
+ *      现在每 N 轮整理一次（默认 4 轮），平时零成本。
+ *   3. **以前失败是静默的**：提取失败只写日志，界面上什么都看不出来 ——
+ *      用户看到的就是"记忆好像是假的"。所以现在有 `lastError` / `lastDistillAt`，
+ *      状态通过 /memory 暴露到界面上。
  *
- * 为什么就是一堆 .md 文件、不上向量库：陪伴场景的记忆量是**几十条**级别，
- * 全部塞进 system prompt 完全放得下（实测 20 条约 1.5k token），
- * 而检索的复杂度、embedding 的依赖、召回不准的风险都是净负担。
- * 真到了几百条再说 —— 那时候要换的是存储层，接口就这两个函数。
+ * 为什么是"输出完整列表"而不是"增量追加"：增量会让同一件事攒出七八个版本
+ * （"他喜欢猫" / "他养了只猫" / "他家有只橘猫"），而完整列表天然逼着模型做合并。
+ *
+ * 为什么不上向量库：这个规模（几十条）下，全量注入 system prompt 优于检索 ——
+ * 零依赖、零召回错误。到 200~300 条以上再谈检索，第一步也是 SQLite FTS5（标准库自带）。
  */
 
 import fs from 'node:fs'
@@ -21,102 +26,186 @@ import path from 'node:path'
 import { DATA_DIR } from '../config.js'
 import type { LLMConfig } from '../config.js'
 import { chatOnce } from './llm.js'
+import { readRecentTurns, transcriptStats } from './transcript.js'
 
 const MEMORY_DIR = path.join(DATA_DIR, 'memory')
+const MEMORY_FILE = path.join(MEMORY_DIR, 'user.md')
+
+/** 每几轮整理一次记忆 */
+const DISTILL_EVERY_TURNS = Number(process.env.AGENT_DISTILL_EVERY || 4)
+/** 每次整理看最近多少轮转录 */
+const DISTILL_WINDOW_TURNS = Number(process.env.AGENT_DISTILL_WINDOW || 20)
 
 function ensureDir(): void {
   if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true })
 }
 
-/** 记忆文件列表（不带扩展名） */
-export function listMemory(): string[] {
-  ensureDir()
+/** 记忆条目（每行一条，去掉 `- ` 前缀） */
+export function listEntries(): string[] {
+  if (!fs.existsSync(MEMORY_FILE)) return []
   return fs
-    .readdirSync(MEMORY_DIR)
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => f.replace(/\.md$/, ''))
+    .readFileSync(MEMORY_FILE, 'utf-8')
+    .split('\n')
+    .map((l) => l.replace(/^\s*[-*]\s*/, '').trim())
+    .filter(Boolean)
+}
+
+/** 写回条目（统一成 `- xxx` 列表；空数组 = 清空） */
+function writeEntries(entries: string[]): void {
+  ensureDir()
+  const body = entries.map((e) => `- ${e}`).join('\n')
+  fs.writeFileSync(MEMORY_FILE, body ? `${body}\n` : '', 'utf-8')
+}
+
+/** 拼成可以塞进 system prompt 的那段（空时返回空串，别给模型看"暂无记忆"的噪音） */
+export function loadMemory(): string {
+  const entries = listEntries()
+  if (!entries.length) return ''
+  return `--- 你记得的事 ---\n${entries.map((e) => `- ${e}`).join('\n')}\n--- 记忆结束 ---`
+}
+
+export function clearMemory(): void {
+  if (fs.existsSync(MEMORY_FILE)) fs.unlinkSync(MEMORY_FILE)
+}
+
+/** 删掉某一条（界面上的"忘掉这条"） */
+export function forgetEntry(index: number): boolean {
+  const entries = listEntries()
+  if (index < 0 || index >= entries.length) return false
+  entries.splice(index, 1)
+  writeEntries(entries)
+  return true
 }
 
 /**
- * 加载全部记忆，拼成一段可以塞进 system prompt 的文本。
+ * 当场记一条（`remember` 工具走这条）。
  *
- * 空的时候返回空串（而不是"（暂无记忆）"）：调用方会无脑拼接，
- * 编一句"暂无记忆"给模型看纯属噪音。
+ * 为什么工具和自动整理要并存：整理是"每 4 轮扫一遍"，可能漏掉"这句话很重要"；
+ * 他明确说"记住"的时候，当场落笔比等下一轮扫描可靠。
  */
-export function loadMemory(): string {
-  ensureDir()
-  const files = listMemory()
-  if (files.length === 0) return ''
+export function rememberEntry(text: string): string {
+  const entry = text.replace(/^\s*[-*]\s*/, '').trim()
+  if (!entry) return '内容为空，没记。'
+  const entries = listEntries()
+  if (entries.some((e) => e === entry)) return `已经记过了：${entry}`
+  entries.push(entry)
+  writeEntries(entries.slice(-60))
+  return `记住了：${entry}`
+}
 
-  const parts: string[] = []
-  for (const name of files) {
-    const content = fs.readFileSync(path.join(MEMORY_DIR, `${name}.md`), 'utf-8').trim()
-    if (content) parts.push(`[${name}]\n${content}`)
+// ── 整理状态（界面要能看见"到底有没有在记"） ──
+
+let turnsSinceDistill = 0
+let lastDistillAt = 0
+let lastError = ''
+let distilling = false
+
+export interface MemoryStatus {
+  entries: string[]
+  lastDistillAt: number
+  lastError: string
+  turnsSinceDistill: number
+  distillEvery: number
+  window: number
+  transcriptTurns: number
+}
+
+export function memoryStatus(sessionId = 'default'): MemoryStatus {
+  return {
+    entries: listEntries(),
+    lastDistillAt,
+    lastError,
+    turnsSinceDistill,
+    distillEvery: DISTILL_EVERY_TURNS,
+    window: DISTILL_WINDOW_TURNS,
+    transcriptTurns: transcriptStats(sessionId).turns,
   }
-  if (parts.length === 0) return ''
-  return `--- 你记得的事 ---\n${parts.join('\n\n')}\n--- 记忆结束 ---`
 }
 
-/** 写入/覆盖一个记忆文件 */
-export function saveMemory(name: string, content: string): void {
-  ensureDir()
-  const safe = name.replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 40) || 'note'
-  fs.writeFileSync(path.join(MEMORY_DIR, `${safe}.md`), content.trim(), 'utf-8')
-}
+const DISTILL_PROMPT = `你是她的记忆管理器。下面是两个人最近的对话记录，以及她**现在已经记得**的事。
 
-/** 清空记忆（设置面板里的「让她忘掉」） */
-export function clearMemory(): void {
-  ensureDir()
-  for (const name of listMemory()) fs.unlinkSync(path.join(MEMORY_DIR, `${name}.md`))
-}
-
-const EXTRACT_PROMPT = `你是她的记忆管理器。判断下面这段对话里，有没有**关于指挥官这个人**、值得长期记住的事。
-
-已有记忆：
+## 已有记忆
 {existing}
 
-最新对话：
-指挥官: {user}
-她: {assistant}
+## 最近的对话
+{dialog}
 
-判断规则：
-- 记住：他的偏好、习惯、作息、近况、在意的人和事、说过的重要的话、两个人的约定
-- 不记：临时性的内容（这次问的问题、一次性查询、闲聊客套）
-- 不重复：已有的记忆里已经写了就别再写一遍
-- 宁缺勿滥：拿不准就不记。记错比记不住更糟 —— 她会用错误的记忆去关心他
+## 任务
+输出**更新后的完整记忆列表**（每行一条，以 "- " 开头）。
 
-有值得记的 → 输出更新后的**完整**记忆（Markdown，分条，每条一行，最多 60 条）
-没有 → 只输出 NO_UPDATE
-不要输出别的内容：`
+规则：
+- 只记**关于他这个人**、长期有价值的事：偏好、习惯、作息、近况、在意的人和事、两个人的约定
+- 不记：临时的问答、一次性的查询、闲聊客套
+- **合并同类**：已有条目被新信息更新了就改写那一条，不要新增重复的
+- **保持简短**：一条一句话；时间敏感的事在括号里标月份，例如"（9月）"
+- **总数控制在 50 条以内**：重要的先留，过时的直接删掉
+- 没有值得记的、且已有记忆也不用改 → 只输出 NO_UPDATE
+
+只输出记忆列表或 NO_UPDATE，不要任何解释：`
+
+/** 现在整理一次：读转录窗口 → 让模型输出完整条目列表 → 落盘 */
+export async function distillNow(
+  sessionId: string,
+  llm: LLMConfig,
+): Promise<{ updated: boolean; error?: string }> {
+  if (distilling) return { updated: false }
+  if (!llm.apiKey) {
+    // ★ 这条也要**留下痕迹**：不然界面上还是"什么都没发生"（本次改动的初衷之一）
+    lastError = '没有可用的 LLM 配置（检查设置里的接口地址和 key）'
+    return { updated: false, error: lastError }
+  }
+
+  distilling = true
+  try {
+    const turns = readRecentTurns(sessionId, DISTILL_WINDOW_TURNS)
+    if (!turns.length) return { updated: false }
+
+    const dialog = turns
+      .map((t) => `${t.role === 'user' ? '他' : '我'}: ${t.text.slice(0, 300)}`)
+      .join('\n')
+    const existing = listEntries()
+    const prompt = DISTILL_PROMPT.replace(
+      '{existing}',
+      existing.length ? existing.map((e) => `- ${e}`).join('\n') : '（还没有）',
+    ).replace('{dialog}', dialog)
+
+    const out = (await chatOnce(prompt, llm, 900)).trim()
+    lastDistillAt = Date.now()
+    turnsSinceDistill = 0
+
+    if (!out || out === 'NO_UPDATE') {
+      lastError = ''
+      return { updated: false }
+    }
+
+    const entries = out
+      .split('\n')
+      .map((l) => l.replace(/^\s*[-*]\s*/, '').trim())
+      .filter((l) => l && !l.startsWith('#') && l !== 'NO_UPDATE')
+      .slice(0, 60)
+
+    if (!entries.length) return { updated: false }
+
+    writeEntries(entries)
+    lastError = ''
+    console.log(`[memory] 已整理：${entries.length} 条`)
+    return { updated: true }
+  } catch (err) {
+    // ★ 错误要留下来给界面看：以前只 console.warn，用户看到的就是"记忆好像是假的"
+    lastError = err instanceof Error ? err.message : String(err)
+    console.warn('[memory] 整理失败：', lastError)
+    return { updated: false, error: lastError }
+  } finally {
+    distilling = false
+  }
+}
 
 /**
- * 异步提取记忆 —— 一轮对话之后跑，**不阻塞回复**。
- *
- * 这是陪伴感的来源之一：下次她开口时，"你还记得我昨天说……"是设计出来的，
- * 靠的就是这里悄悄写下的几行字。
+ * 一轮对话之后调用：先记账（转录，零成本），到点了才整理。
+ * 不阻塞响应 —— 调用方 `void` 掉即可。
  */
-export async function extractMemory(
-  userMessage: string,
-  assistantReply: string,
-  llm: LLMConfig,
-): Promise<string | null> {
-  if (!llm.apiKey) return null
-  try {
-    const existing = loadMemory()
-    const prompt = EXTRACT_PROMPT.replace('{existing}', existing || '（还没有）')
-      .replace('{user}', userMessage.slice(0, 800))
-      .replace('{assistant}', assistantReply.slice(0, 800))
-
-    const result = await chatOnce(prompt, llm, 600)
-    const text = (result || '').trim()
-    if (!text || text === 'NO_UPDATE' || text.length < 10) return null
-
-    saveMemory('user', text)
-    console.log(`[memory] 已更新（${text.length} 字）`)
-    return text
-  } catch (err) {
-    // 记忆失败不能影响对话 —— 她是伴侣，不是数据库
-    console.warn('[memory] 提取失败：', err instanceof Error ? err.message : err)
-    return null
-  }
+export function afterTurn(sessionId: string, llm: LLMConfig): void {
+  turnsSinceDistill++
+  if (turnsSinceDistill < DISTILL_EVERY_TURNS) return
+  void distillNow(sessionId, llm)
 }

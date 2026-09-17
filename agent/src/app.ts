@@ -20,7 +20,7 @@ import cors from 'cors'
 import { PORT } from './config.js'
 import { chatRouter } from './routes/chat.js'
 import { initMcp, closeMcp, getMcpStatus } from './services/mcp.js'
-import { listMemory } from './services/memory.js'
+import { listEntries } from './services/memory.js'
 
 const app = express()
 app.use(cors())
@@ -33,7 +33,7 @@ app.get('/health', (_req, res) => {
     service: 'nexus-agent',
     port: PORT,
     mcp: getMcpStatus(),
-    memoryFiles: listMemory().length,
+    memoryFiles: listEntries().length,
   })
 })
 

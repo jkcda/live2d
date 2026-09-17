@@ -19,7 +19,7 @@ import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import type { LLMConfig } from '../config.js'
 import { createModel } from './llm.js'
-import { loadMemory, saveMemory } from './memory.js'
+import { loadMemory, rememberEntry } from './memory.js'
 import { getMcpTools } from './mcp.js'
 import { searchWeb } from './search.js'
 
@@ -125,16 +125,9 @@ function createTools(ctx: AgentContext) {
   // 主动记住
   tools.push(
     tool(
-      async ({ content, topic }: { content: string; topic?: string }) => {
-        const existing = loadMemory()
-        const line = `- ${content.trim()}`
-        const next = existing
-          ? existing.includes(line)
-            ? existing
-            : `${existing}\n${line}`
-          : line
-        saveMemory(topic || 'user', next.replace(/--- 你记得的事 ---|--- 记忆结束 ---/g, '').trim())
-        return `记住了：${content}`
+      async ({ content }: { content: string; topic?: string }) => {
+        // 当场追加一条（去重由 rememberEntry 负责）；定期整理会把同类条目合并
+        return rememberEntry(content)
       },
       {
         name: 'remember',
