@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 // node16 模块解析要求显式扩展名 —— 写 .js，即使源文件是 .ts
 import { isSupported as nativeStyleSupported, setNoActivate } from './win-style.js'
 import { ActivityObserver, activitySnapshot } from './observer.js'
-import { captureForeground, ScreenGate } from './screen.js'
+import { captureForeground, ScreenGate, type ScreenFrame } from './screen.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -71,6 +71,21 @@ const observer = new ActivityObserver()
  * 只是判据从字符串相等换成了感知哈希距离。
  */
 const screenGate = new ScreenGate()
+
+/**
+ * 最近一张被门控接受的截图（**只留一帧**，见 screen.ts 的生命周期契约）。
+ *
+ * 门控拦下新一轮抓图时，这一帧就是"他此刻屏幕上大概还是这样"。
+ */
+let lastFrame: ScreenFrame | null = null
+
+/**
+ * 复用旧帧的上限。
+ *
+ * 比这更旧的画面宁可这次不给图 —— 让她描述一个 10 分钟前的屏幕，
+ * 比让她说"我看看"要糟得多。
+ */
+const FRAME_MAX_AGE_MS = 30_000
 
 /**
  * 允许渲染层用 `force` 绕过变化门控。
@@ -424,6 +439,15 @@ ipcMain.handle('observe:status', () => ({
  * 所以这里只管「变化门控」这一道（它是对已抓到的图做判断，没有窗口期问题）。
  */
 ipcMain.handle('screen:capture', async (_e, force = false) => {
+  /*
+   * 「暂停观察」必须同时断掉截图。
+   *
+   * isObservable() 只管「是不是黑名单 / 是不是她自己」，**它不管暂停开关** ——
+   * 少这一句的话，用户点了托盘的「暂停观察」之后，标题看不到了、图却照样能抓。
+   * 那正是这个开关最不该有的样子：他按下去的意思是"别看了"，不是"少看一样"。
+   */
+  if (observer.paused) return null
+
   const frame = await captureForeground()
   if (!frame) return null
 
@@ -438,6 +462,47 @@ ipcMain.handle('screen:capture', async (_e, force = false) => {
   if (!bypass && !screenGate.accept(frame)) return null
 
   return frame
+})
+
+/**
+ * 取一张「这一轮可以附给她的」截图。
+ *
+ * ── 和 screen:capture 的分工 ──
+ *
+ * `screen:capture` 是验证用的「抓一张」：门控拦下就是 null，语义干净。
+ * 这条是给**对话**用的，多两件事：
+ *
+ *   1. **门控拦下时退回最近一帧**（并带上年龄）。
+ *      门控的判据是「画面没怎么变就别再送一张」，可「他问她你在看什么」这一刻
+ *      往往正好就是没变的时候 —— 没变恰恰说明上次那张还是准的。
+ *      年龄必须一起给她：她得知道这是「几秒前」而不是「此刻」。
+ *   2. **暂停开关**照旧先判（和 capture 一样）。
+ *
+ * 只留一帧是刻意的：一帧 base64 几百 KB，攒起来就是"越堆越多最后炸掉"，
+ * 见 screen.ts 顶部的生命周期契约。
+ */
+ipcMain.handle('screen:forTurn', async () => {
+  if (observer.paused) return null
+
+  // captureForeground 内部已经过了 isObservable（黑名单 + 不是她自己），
+  // 而且是**一次读**的前台窗口 —— 这里不要再判一遍，两处名单迟早不同步
+  const frame = await captureForeground()
+  if (!frame) return null
+
+  if (screenGate.accept(frame)) {
+    lastFrame = frame
+  } else if (!lastFrame || Date.now() - lastFrame.at > FRAME_MAX_AGE_MS) {
+    // 画面没变、而且手上那张已经太旧 —— 宁可这次不给图，也别让她描述过时的画面
+    return null
+  }
+
+  const f = lastFrame ?? frame
+  return {
+    dataUrl: f.dataUrl,
+    width: f.width,
+    height: f.height,
+    ageSeconds: Math.round((Date.now() - f.at) / 1000),
+  }
 })
 
 ipcMain.handle('screen:gateReset', () => {

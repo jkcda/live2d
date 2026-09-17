@@ -39,6 +39,24 @@ contextBridge.exposeInMainWorld('nexus', {
    */
   captureScreen: (force = false) => ipcRenderer.invoke('screen:capture', force),
 
+  /**
+   * 取一张「这一轮可以附给她的」截图。
+   *
+   * 和 captureScreen 的区别：这条是给**对话**用的 —— 门控拦下新抓取时会退回
+   * 最近一帧并带上 `ageSeconds`（画面没变，恰恰说明那张旧图还是准的），
+   * 但比 30 秒更旧的就返回 null（宁可这次不给图，也别让她描述过时的画面）。
+   *
+   * 返回 null 表示：暂停观察 / 命中黑名单 / 前台是她自己 / 手上没有足够新的帧。
+   * **拿到它只说明这张图是可以给她看的** —— 过滤在主进程完成。
+   */
+  screenForTurn: () =>
+    ipcRenderer.invoke('screen:forTurn') as Promise<{
+      dataUrl: string
+      width: number
+      height: number
+      ageSeconds: number
+    } | null>,
+
   /** 清掉变化门控的状态（下一个测试用例要一张干净的基准图时用） */
   resetScreenGate: () => ipcRenderer.invoke('screen:gateReset'),
 

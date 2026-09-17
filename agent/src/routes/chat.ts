@@ -26,6 +26,7 @@ import {
   type ActivitySnapshot,
   type AgentContext,
   type ChatMessage,
+  type ScreenAttachment,
 } from '../services/agent.js'
 import { compactHistory, loadCompaction } from '../services/compaction.js'
 import { clearMemory, afterTurn, distillNow, forgetEntry, memoryStatus } from '../services/memory.js'
@@ -42,6 +43,33 @@ interface ChatBody {
   sessionId?: string
   /** 当前前台窗口快照。前端发请求前向 Electron 主进程取一次带上（已过黑名单） */
   activity?: ActivitySnapshot | null
+  /** 这一轮附上的屏幕截图（同样已在主进程过完黑名单 + 暂停开关） */
+  screen?: ScreenAttachment | null
+}
+
+/**
+ * 校验前端递上来的截图。
+ *
+ * ★ 为什么服务端还要判一遍格式和体积：
+ *   过滤（黑名单）**不能**在这里做 —— 那必须在数据产生的地方做，
+ *   事后过滤不算数。但**形状**必须判：这是个 HTTP 接口，谁都能 POST 一个
+ *   几 MB 的字符串进来，而它会被塞进模型请求里（体积和费用都跟着走）。
+ */
+function sanitizeScreen(raw: unknown): ScreenAttachment | null {
+  if (!raw || typeof raw !== 'object') return null
+  const s = raw as Partial<ScreenAttachment>
+  if (typeof s.dataUrl !== 'string') return null
+  if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(s.dataUrl)) return null
+  // 上限 3MB base64（约 2.2MB 原图）。主进程压到长边 1024 之后是百来 KB
+  if (s.dataUrl.length > 3_000_000) return null
+
+  const age = Number(s.ageSeconds)
+  return {
+    dataUrl: s.dataUrl,
+    width: Number.isFinite(Number(s.width)) ? Number(s.width) : 0,
+    height: Number.isFinite(Number(s.height)) ? Number(s.height) : 0,
+    ageSeconds: Number.isFinite(age) ? Math.max(0, Math.min(600, Math.trunc(age))) : 0,
+  }
 }
 
 chatRouter.post('/chat', async (req: Request, res: Response) => {
@@ -83,7 +111,11 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   const abort = new AbortController()
   req.on('close', () => abort.abort())
 
-  const ctx: AgentContext = { commands: [], activity: body.activity ?? null }
+  const ctx: AgentContext = {
+    commands: [],
+    activity: body.activity ?? null,
+    screen: sanitizeScreen(body.screen),
+  }
   let assistantText = ''
 
   try {

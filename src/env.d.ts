@@ -89,6 +89,26 @@ interface NexusAPI {
   setPassthroughIsland: (
     rect: { x: number; y: number; width: number; height: number } | null,
   ) => Promise<boolean>
+
+  /**
+   * 这一轮可以附给她的屏幕截图。
+   *
+   * 和 `captureScreen` 的区别：这条是给**对话**用的 ——
+   * 门控拦下新抓取时会退回最近一帧并带上 `ageSeconds`
+   * （画面没变恰恰说明那张旧图还是准的），太旧的（>30s）返回 null。
+   *
+   * null 表示：暂停观察 / 命中黑名单 / 前台是她自己 / 手上没有足够新的帧。
+   */
+  screenForTurn: () => Promise<ScreenForTurn | null>
+}
+
+/** 附在用户这一条消息上的屏幕截图 */
+interface ScreenForTurn {
+  dataUrl: string
+  width: number
+  height: number
+  /** 这张图是几秒前抓的 —— 她得知道这是「刚才」而不是「此刻」 */
+  ageSeconds: number
 }
 
 interface Window {

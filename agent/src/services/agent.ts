@@ -47,10 +47,27 @@ export interface ActivitySnapshot {
   forSeconds: number
 }
 
+/**
+ * 这一轮附上的屏幕截图。
+ *
+ * 由前端在发请求前向 Electron 主进程取一次带上 —— **已经过黑名单和暂停开关**，
+ * 和 activity 是同一条规矩：过滤在数据产生的地方做，服务端只校验形状。
+ */
+export interface ScreenAttachment {
+  /** data URL（`data:image/jpeg;base64,…`） */
+  dataUrl: string
+  width: number
+  height: number
+  /** 这张图是几秒前抓的。她得知道这是「刚才」而不是「此刻」 */
+  ageSeconds: number
+}
+
 export interface AgentContext {
   commands: AgentCommand[]
   /** 这一轮请求带过来的前台窗口快照；没带就是 null */
   activity: ActivitySnapshot | null
+  /** 这一轮附上的屏幕截图；没有就是 null（暂停 / 黑名单 / 画面没变） */
+  screen: ScreenAttachment | null
 }
 
 // ── 工具结果缓存（只缓存又慢又稳定的） ──
@@ -243,7 +260,7 @@ function createTools(ctx: AgentContext) {
  * 而且表现是「设置面板里少一个」，不报错、很难发现。
  */
 export function builtinToolNames(): string[] {
-  const stub: AgentContext = { commands: [], activity: null }
+  const stub: AgentContext = { commands: [], activity: null, screen: null }
   return createTools(stub)
     .map((t) => (t as { name?: string }).name)
     .filter((n): n is string => Boolean(n))
@@ -267,6 +284,12 @@ const BASE_PROMPT = `你是他的桌面伴侣，一个住在电脑屏幕里的�
 - 情绪明显变化 → show_expression（她脸上真的会变）
 - 只是聊天 → respond
 - 需要工具时**直接调**，不要先说"让我查一下"
+
+## 屏幕
+- 他说话时，你有时会收到一张他屏幕的截图（只截他前台窗口那一块，可能是几秒前抓的）。
+- **默认不要提这张图** —— 他问起、或者画面里的东西正好和话题相关时才用。
+- 别逐字念截图里的文件名、消息、代码，用你自己的话概括。
+- 没附图**不代表你看不见**：那只说明画面和上次比没什么变化，用 what_is_user_doing 就行。
 
 ## 铁律
 - 绝不编造事实。不确定就说不知道，或者去查
@@ -332,6 +355,34 @@ export interface ChatMessage {
   content: string
 }
 
+/** OpenAI 风格的内容块 —— 这里只用得上两种：文字和图片 */
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
+/**
+ * 这一条用户消息的内容。
+ *
+ * 带截图时用**内容块数组**（OpenAI 的多模态格式）：
+ *   [{ type:'text', text }, { type:'image_url', image_url:{ url: dataUrl } }]
+ *
+ * ★ 图只挂在这一条消息上，**永远不进历史**：
+ *   历史的来源是前端的 `this.history`（纯文字）和服务端的转录 jsonl（纯文字），
+ *   一百多 KB 的 base64 一旦落进 localStorage 就是"把配额撑爆"。
+ *   electron/screen.ts 顶上那份生命周期契约说的就是这件事。
+ *
+ * 顺带把「这张图是几秒前的」写进文字里 —— 不写的话她会把一张十几秒前的画面
+ * 当成此刻，说出"你现在正在…"这种错的判断。
+ */
+function userContent(screen: ScreenAttachment | null, text: string): string | ContentBlock[] {
+  if (!screen) return text
+  const when = screen.ageSeconds <= 2 ? '刚刚抓的' : `${screen.ageSeconds} 秒前抓的`
+  return [
+    { type: 'text', text: `${text}\n\n（附一张他屏幕的截图，${when}，内容是他前台窗口那一块）` },
+    { type: 'image_url', image_url: { url: screen.dataUrl } },
+  ]
+}
+
 /**
  * 跑一轮对话，把 LangChain 的事件流转成我们自己的事件流。
  *
@@ -366,7 +417,7 @@ export async function* runAgent(
       {
         messages: [
           ...messages.map((m) => ({ role: m.role, content: m.content })),
-          { role: 'user' as const, content: userInput },
+          { role: 'user' as const, content: userContent(opts.ctx.screen, userInput) },
         ],
       },
       { version: 'v2', recursionLimit: 60 },

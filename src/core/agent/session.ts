@@ -42,6 +42,26 @@ async function currentActivity(): Promise<ActivitySnapshot | null> {
   }
 }
 
+/**
+ * 取一张这一轮要附给她的屏幕截图。
+ *
+ * ★ 图**只挂在这一条消息上，绝不进历史**。
+ *
+ * 一帧 base64 有一百多 KB，localStorage 配额才 5MB —— 进历史就是把整个
+ * 历史存储撑爆（见 electron/screen.ts 顶部的生命周期契约）。所以它走的
+ * 路径和 activity 一样：`stream()` 里取一次、随请求带上，**不进 messages**。
+ *
+ * 同理「永远不抛」：看屏幕是锦上添花，不能因为它把整轮对话搞挂。
+ * 拿不到就是 null —— 她照样能聊，只是少一张图。
+ */
+async function currentScreen(): Promise<ScreenForTurn | null> {
+  try {
+    return (await window.nexus?.screenForTurn()) ?? null
+  } catch {
+    return null
+  }
+}
+
 export interface SessionOptions {
   cfg: LLMConfig
   persona?: Persona
@@ -233,6 +253,14 @@ export class ChatSession {
     const agentCfg = this.agent
     if (agentCfg?.enabled && agentLikelyUp()) {
       try {
+        /*
+         * activity 和 screen 都在这里取（发请求前一次），都不进 messages ——
+         * 历史里永远只有文字。两条一起取是为了让「她在看什么」这一轮的
+         * 文字描述和画面是同一时刻的。
+         */
+        const activity = await currentActivity()
+        const screen = activity ? await currentScreen() : null
+
         for await (const ev of streamAgent({
           url: agentCfg.url,
           // agent 服务自己拼 system（人设 + 记忆 + 时间），所以历史里不带 system
@@ -241,7 +269,8 @@ export class ChatSession {
           llm: this.cfg,
           systemPrompt: this.system,
           sessionId: agentCfg.sessionId,
-          activity: await currentActivity(),
+          activity,
+          screen,
           signal,
         })) {
           yield ev

@@ -36,6 +36,14 @@ export interface AgentStreamOptions {
    * 取不到（没在观察 / 已暂停 / 命中黑名单）就是 undefined，服务端当「不知道」处理。
    */
   activity?: ActivitySnapshot | null
+  /**
+   * 这一轮附上的屏幕截图（前台窗口那一块，已过黑名单 + 暂停开关）。
+   *
+   * 服务端把它作为**图片内容块**拼在这条用户消息上，不写进历史 ——
+   * 历史里塞 base64 会把 localStorage 撑爆（见 electron/screen.ts 的契约）。
+   * 拿不到就是 null：她照样能聊，只是少一张图。
+   */
+  screen?: ScreenForTurn | null
   signal?: AbortSignal
 }
 
@@ -68,6 +76,7 @@ export async function* streamAgent(opts: AgentStreamOptions): AsyncGenerator<Age
       systemPrompt: opts.systemPrompt,
       sessionId: opts.sessionId,
       activity: opts.activity ?? null,
+      screen: opts.screen ?? null,
     }),
     signal: opts.signal,
   })
