@@ -44,6 +44,44 @@ os.chdir(COSY_ROOT)  # 它的相对路径（asset/、输出目录）都按仓库
 # wetext 的文本正则小模型默认下到 C 盘 —— 指到 D 盘（用户明确不想占系统盘）
 os.environ.setdefault("MODELSCOPE_CACHE", str(COSY_ROOT / "modelscope-cache"))
 
+# ── 让 snapshot_download 优先用本地已有的模型，绝不联网 ──
+#
+# ★ 为什么必须打这个补丁
+#
+# wetext 每次构造 Normalizer 都会调 `snapshot_download("pengzhendong/wetext")`
+# （见 wetext/wetext.py），**没有 local_files_only 参数** —— 也就是说哪怕模型
+# 早就在本地缓存里，它也要去 ModelScope 问一次元数据。
+#
+# 网络一断（或没配 token，报 "Authentication token does not exist"）这一次问就会
+# 卡住/失败，然后 frontend 建不起来 —— 表现是**合成产出 0 块音频**，
+# 也就是"她完全没有语音"。实测：重启服务 + 网络不通 = 直接没声音，
+# 而且日志里只有一行 "Downloading Model to directory: …"，看不出跟语音有关。
+#
+# 本地已经有模型了就绝不该联网：命中本地目录就直接返回，不命中才走原逻辑。
+def _patch_modelscope_offline_first() -> None:
+    try:
+        import modelscope
+    except ImportError:  # 没装就直接算了（正常装了 wetext 就一定有）
+        return
+
+    cache = Path(os.environ.get("MODELSCOPE_CACHE", ""))
+    original = modelscope.snapshot_download
+
+    def offline_first(repo: str, *args, **kwargs):
+        local = cache / "hub" / repo
+        if local.is_dir() and any(local.iterdir()):
+            # 这里 logging 还没配好（补丁在 basicConfig 之前跑），直接 print
+            print(f"[wetext] 用本地缓存，不联网：{local}", flush=True)
+            return str(local)
+        return original(repo, *args, **kwargs)
+
+    modelscope.snapshot_download = offline_first
+
+
+# 必须在 import cosyvoice（它会 import wetext，而 wetext 是
+# `from modelscope import snapshot_download` —— 在它 import 的那一刻就把函数绑走了）之前打
+_patch_modelscope_offline_first()
+
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
@@ -295,12 +333,18 @@ def tts(req: TTSRequest) -> Response:
 
     try:
         with _lock:
-            chunks = [
-                out["tts_speech"]
-                for out in model.inference_zero_shot(
-                    req.text.strip(), "", "", voice, stream=True, speed=req.speed
-                )
-            ]
+            # 计时：首块到得多快、整体多慢 —— 这两个数决定了"要不要做端到端流式"
+            t0 = time.time()
+            first_at = 0.0
+            chunks = []
+            for out in model.inference_zero_shot(
+                req.text.strip(), "", "", voice, stream=True, speed=req.speed
+            ):
+                if not first_at:
+                    first_at = time.time() - t0
+                chunks.append(out["tts_speech"])
+            total = time.time() - t0
+            log.info("合成 %d 字｜首块 %.2fs｜总计 %.2fs｜%d 块", len(req.text.strip()), first_at, total, len(chunks))
     except Exception as err:  # noqa: BLE001
         log.exception("合成失败：%r", req.text[:40])
         raise HTTPException(status_code=500, detail=str(err)) from err
@@ -309,6 +353,18 @@ def tts(req: TTSRequest) -> Response:
         raise HTTPException(status_code=500, detail="模型没有产出音频")
 
     wav = torch.cat(chunks, dim=1).squeeze(0).cpu().numpy()
+
+    # 观测：首块延迟 / 总耗时 / RTF。这三个数决定"值不值得做端到端流式"：
+    # 首块快而总时长慢（RTF>1）说明流式能让她早开口，但中途会补给不上。
+    audio_sec = wav.shape[-1] / sample_rate if wav.size else 0.0
+    log.info(
+        "合成 %d 字｜首块 %.2fs｜总计 %.2fs｜音频 %.2fs｜RTF %.2f",
+        len(req.text.strip()),
+        first_at,
+        total,
+        audio_sec,
+        (total / audio_sec) if audio_sec else 0.0,
+    )
     # 归一化：模型输出的峰值只有 0.6~0.7，而口型是按振幅驱动的 ——
     # 不归一化的话她的嘴会比实际说话幅度小一截（edge 引擎那边同理）
     peak = float(np.max(np.abs(wav))) if wav.size else 0.0

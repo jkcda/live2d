@@ -95,6 +95,11 @@ const SCREEN_REFRESH_MS = 15_000
 let lastWarmedKey = ''
 let warmTimer: NodeJS.Timeout | null = null
 let warming = false
+/** 上一次真的抓图的时间 —— 窗口来回切时别跟着疯狂抓 */
+let lastWarmAt = 0
+
+/** 两次抓图之间的最小间隔：切窗口很频繁，不压一下会一直抓（而且每次都要几百毫秒） */
+const WARM_MIN_GAP_MS = 2000
 
 /**
  * 这一轮该抓哪块屏幕。
@@ -132,31 +137,25 @@ async function warmScreen(): Promise<void> {
   const key = `${rect.x},${rect.y},${rect.width}x${rect.height}`
   const fresh = lastFrame !== null && Date.now() - lastFrame.at < SCREEN_REFRESH_MS
   if (key === lastWarmedKey && fresh) return
+  // 窗口来回切的时候，别每一秒都抓一次（每次几百毫秒）
+  if (Date.now() - lastWarmAt < WARM_MIN_GAP_MS) return
 
   warming = true
-  let hidden = false
+  lastWarmAt = Date.now()
   try {
     /*
-     * 她自己的窗口正压在这块区域上时，先把自己藏起来再抓。
+     * ★ 抓图时**不隐藏她自己**。
      *
-     * 不算这一步的话图里会有她自己（她永远置顶），
-     * 模型会看到"画面角上有个女孩"，很怪。
-     * 只在**真的重叠**时才藏 —— 大多数时候她那一小块不挡事，不需要闪。
+     * 一开始是"先 setOpacity(0) 再抓，抓完恢复"，为的是不让她的身影出现在图里。
+     * 但那要 500ms 左右（getSources 整块屏 + 编码），表现就是**人物每抓一次
+     * 就闪一下** —— 用户一眼就看出来了（"人物怎么一闪一闪的"），比图里多一个她糟得多。
+     *
+     * 试过更干净的路：按窗口抓（types:['window']）天然不含覆盖层。
+     * **这台机器上不可用**：Windows Graphics Capture 直接报 E_INVALIDARG
+     * （Failed to start capture: -2147024809），而且能列出来的窗口源本身就不全。
+     *
+     * 所以：接受"图里可能有她自己"，并在人设里跟她说清楚那是她自己、不用管。
      */
-    const phys = screen.dipToScreenRect(null, win.getBounds())
-    const overlaps =
-      phys.x < rect.x + rect.width &&
-      rect.x < phys.x + phys.width &&
-      phys.y < rect.y + rect.height &&
-      rect.y < phys.y + phys.height
-
-    if (overlaps) {
-      win.setOpacity(0)
-      hidden = true
-      // 让这一帧先真的不可见再抓（否则抓到的还是上一帧合成结果）
-      await new Promise((done) => setTimeout(done, 60))
-    }
-
     const frame = await captureRect(rect)
     if (frame) {
       lastFrame = frame
@@ -165,8 +164,6 @@ async function warmScreen(): Promise<void> {
   } catch (err) {
     console.warn('[screen] 预热失败：', err instanceof Error ? err.message : err)
   } finally {
-    // 无论如何都要把她显示回来 —— 绝不能因为一次抓图失败让她隐形
-    if (hidden && win && !win.isDestroyed()) win.setOpacity(1)
     warming = false
   }
 }
