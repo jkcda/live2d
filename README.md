@@ -315,20 +315,30 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 
 ## 快捷方式 / 服务
 
-三个进程，各管一段，都可以单独起停：
+四个进程，各管一段：
 
 | 服务 | 端口 | 跑什么 | 不在时会怎样 |
 |---|---|---|---|
 | 应用（`pnpm dev:web` / Electron） | 5176 | 渲染 + 语音 + 界面 | —— |
 | 推理服务（`python -m service.main`） | 8765 | TTS / ASR / VAD | 静默降级成"只显示文字" |
 | **agent 服务**（`cd agent && pnpm dev`） | 8766 | 工具 / MCP / 记忆 / 历史压缩 | **退回直连 LLM**：还能聊天，但没有工具和记忆 |
+| **CosyVoice 模型服务**（`.\tools\start-cosyvoice.ps1`） | 8788 | 她自己的音色（克隆） | 主服务报"引擎不可用"，换 edge/sapi 仍有声音 |
+
+### 一键拉起（推荐）
 
 ```powershell
-# 她的脑子（工具 / MCP / 记忆）
-cd agent
-pnpm install
-pnpm dev
+.\tools\start-all.ps1              # 全部拉起，已起的自动跳过
+.\tools\start-all.ps1 -Electron    # 前端用 Electron 桌宠窗口（默认是 dev server）
+.\tools\start-all.ps1 -Skip agent  # 只起前三个
+.\tools\stop-all.ps1               # 停掉全部（按 PID 精确停，端口只作兜底）
+.\tools\stop-all.ps1 -KeepWeb      # 只重启后端时留着前端
 ```
+
+`start-all` 会**真探活**再报告（不是"进程起来了"就算成功 —— 模型加载要十几秒，
+那期间端口通但接口还没好），最后打印一张真实状态表；日志在 `logs\`。
+
+> **这台机器的一个坑**：vite 只绑 IPv6（`::1`），所以前端要用
+> `http://localhost:5176/`，写 `127.0.0.1` 会连接被拒。脚本里的探活已经按这个来。
 
 启动后设置面板/控制台可查：`GET http://127.0.0.1:8766/health`（MCP 状态、记忆条数）、
 `GET /memory`（她记得什么）。详见 [`agent/README.md`](agent/README.md)。
