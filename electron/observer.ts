@@ -85,6 +85,7 @@ let api: {
   GetForegroundWindow: () => bigint
   GetWindowTextW: (hwnd: bigint, buf: Uint16Array, max: number) => number
   GetWindowThreadProcessId: (hwnd: bigint, pid: Uint32Array) => number
+  GetWindowRect: (hwnd: bigint, rect: Int32Array) => boolean
   OpenProcess: (access: number, inherit: boolean, pid: number) => bigint
   QueryFullProcessImageNameW: (
     handle: bigint,
@@ -111,6 +112,7 @@ function ensureApi(): typeof api {
       GetForegroundWindow: user32.func('uint64 GetForegroundWindow()'),
       GetWindowTextW: user32.func('int32 GetWindowTextW(uint64 hWnd, _Out_ uint16 *lp, int32 nMax)'),
       GetWindowThreadProcessId: user32.func('uint32 GetWindowThreadProcessId(uint64 hWnd, _Out_ uint32 *pid)'),
+      GetWindowRect: user32.func('bool GetWindowRect(uint64 hWnd, _Out_ int32 *rect)'),
       OpenProcess: kernel32.func('uint64 OpenProcess(uint32 access, bool inherit, uint32 pid)'),
       QueryFullProcessImageNameW: kernel32.func(
         'bool QueryFullProcessImageNameW(uint64 handle, uint32 flags, _Out_ uint16 *buf, _Inout_ uint32 *size)',
@@ -281,4 +283,41 @@ export function activitySnapshot(observer: ActivityObserver): Record<string, unk
     since: a.since,
     forSeconds: Math.round((Date.now() - a.since) / 1000),
   }
+}
+
+/**
+ * 前台窗口在**屏幕坐标系**里的矩形（物理像素）。
+ *
+ * 截图要按它裁 —— 只截前台窗口那一块，不截全桌面。
+ * 多显示器下截全屏等于一半是空白，还顺带把另一块屏上的东西也送出去了。
+ *
+ * 注意这是**物理像素**，Electron 的 screen 模块用的是 DIP，
+ * 两者在高 DPI 下不一样，转换在 screen.ts 里做。
+ *
+ * 返回 null 表示读不到（非 Windows / koffi 挂了 / 窗口最小化了）。
+ */
+export function foregroundWindowRect(): {
+  x: number
+  y: number
+  width: number
+  height: number
+} | null {
+  const fn = ensureApi()
+  if (!fn) return null
+
+  const hwnd = fn.GetForegroundWindow()
+  if (!hwnd) return null
+
+  // RECT 是 4 个 int32：left, top, right, bottom
+  const rect = new Int32Array(4)
+  if (!fn.GetWindowRect(hwnd, rect)) return null
+
+  const [left, top, right, bottom] = rect
+  const width = right - left
+  const height = bottom - top
+
+  // 最小化的窗口会给出离谱的负坐标（-32000 那类），挡掉
+  if (width <= 0 || height <= 0) return null
+
+  return { x: left, y: top, width, height }
 }

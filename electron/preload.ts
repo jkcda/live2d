@@ -29,6 +29,20 @@ contextBridge.exposeInMainWorld('nexus', {
   observeStatus: () => ipcRenderer.invoke('observe:status'),
 
   /**
+   * 抓一张前台窗口的截图。
+   *
+   * 返回 null 表示：观察暂停 / 命中黑名单 / 前台是应用自己 / 画面没怎么变。
+   * **拿到就说明这张图是可以看的** —— 黑名单在主进程里就拦掉了，
+   * 渲染层不需要（也不应该）再判一遍。
+   *
+   * force=true 绕过变化门控，只给验证脚本用。
+   */
+  captureScreen: (force = false) => ipcRenderer.invoke('screen:capture', force),
+
+  /** 清掉变化门控的状态（下一个测试用例要一张干净的基准图时用） */
+  resetScreenGate: () => ipcRenderer.invoke('screen:gateReset'),
+
+  /**
    * 订阅「托盘菜单要求打开某个面板」。
    * 返回取消订阅函数 —— 组件卸载时不注销会在热更新后重复触发。
    */

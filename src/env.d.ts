@@ -17,6 +17,22 @@ interface ActivitySnapshot {
 }
 
 /**
+ * 一帧屏幕截图（主进程截的，已经过裁剪 + 降采样 + 黑名单）。
+ *
+ * 已经是可以直接送出去的东西 —— 拿到它就意味着这个窗口是可以看的。
+ */
+interface ScreenFrame {
+  /** data URL（image/jpeg），可直接塞进 image_url */
+  dataUrl: string
+  /** 感知哈希，用来判断「画面变没变」 */
+  hash: string
+  width: number
+  height: number
+  /** 抓取时刻（epoch ms） */
+  at: number
+}
+
+/**
  * Electron 主进程通过 preload 暴露的桥接口。
  * 浏览器环境下 window.nexus 为 undefined，调用前需判空。
  */
@@ -48,6 +64,17 @@ interface NexusAPI {
   /** 暂停 / 恢复观察 */
   setObservePaused: (paused: boolean) => Promise<boolean>
   observeStatus: () => Promise<{ available: boolean; paused: boolean }>
+
+  /**
+   * 抓一张前台窗口的截图。
+   *
+   * 返回 null 表示：观察暂停 / 命中黑名单 / 前台是应用自己 / 画面没怎么变。
+   * **拿到就说明这张图是可以看的** —— 黑名单在主进程里就拦掉了。
+   */
+  captureScreen: (force?: boolean) => Promise<ScreenFrame | null>
+
+  /** 清掉变化门控状态 */
+  resetScreenGate: () => Promise<boolean>
 
   /** 订阅托盘菜单的「打开面板」请求。返回取消订阅函数。 */
   onOpenPanel: (handler: (panel: 'chat' | 'settings') => void) => () => void

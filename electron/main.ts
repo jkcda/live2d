@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 // node16 模块解析要求显式扩展名 —— 写 .js，即使源文件是 .ts
 import { isSupported as nativeStyleSupported, setNoActivate } from './win-style.js'
 import { ActivityObserver, activitySnapshot } from './observer.js'
+import { captureForeground, ScreenGate } from './screen.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -62,6 +63,14 @@ const hasNativeStyle = nativeStyleSupported()
  * 这里只负责生命周期和对外暴露快照。
  */
 const observer = new ActivityObserver()
+
+/**
+ * 截图变化门控。
+ *
+ * 和 observer 的「(进程, 标题) 变了才更新」是同一个思路，
+ * 只是判据从字符串相等换成了感知哈希距离。
+ */
+const screenGate = new ScreenGate()
 
 /**
  * 取静态资源的绝对路径。
@@ -395,6 +404,30 @@ ipcMain.handle('observe:status', () => ({
   available: observer.available,
   paused: observer.paused,
 }))
+
+/**
+ * 抓一张前台窗口的截图。
+ *
+ * ★ 三道闸门在这里收口，别在别处再判一遍 —— 两处名单迟早不同步：
+ *
+ *   1. `observer.snapshot()` 为 null 就不截。它已经覆盖了「暂停中 / 命中黑名单 /
+ *      前台是应用自己」三种情况。截图直接复用这一份判断，不另写一遍。
+ *   2. 变化门控：画面没怎么变就不给。`force` 可绕过，验证脚本用。
+ *   3. 只截前台窗口那一块 —— 在 screen.ts 里做。
+ */
+ipcMain.handle('screen:capture', async (_e, force = false) => {
+  if (!observer.snapshot()) return null
+
+  const frame = await captureForeground()
+  if (!frame) return null
+  if (!force && !screenGate.accept(frame)) return null
+  return frame
+})
+
+ipcMain.handle('screen:gateReset', () => {
+  screenGate.reset()
+  return true
+})
 
 ipcMain.handle('app:quit', () => {
   app.quit()
