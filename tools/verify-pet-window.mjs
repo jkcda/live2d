@@ -11,7 +11,8 @@
  *
  * 关键检查项：
  *   ✓ WS_EX_NOACTIVATE 已设置        → 点她不抢焦点（这是桌宠能日用的前提）
- *   ✓ WS_EX_LAYERED 还在             → 窗口还是透明的
+ *   ✓ 走的是透明合成路径             → WS_EX_LAYERED 或 WS_EX_NOREDIRECTIONBITMAP
+ *                                       （Electron 现在走后者，只认前者会假失败）
  *   ✓ WS_EX_TOPMOST 还在             → 还置顶
  *   ✗ WS_EX_NOACTIVATE 没设          → 会抢焦点
  *   ✗ 扩展样式整个变成 0             → 窗口被写坏了（GetWindowLongW 读到 0
@@ -21,6 +22,12 @@
  *   node tools/verify-pet-window.mjs
  *   node tools/verify-pet-window.mjs --url http://localhost:5176   # 用 dev server
  *   node tools/verify-pet-window.mjs --keep                        # 验证完不关窗口
+ *   node tools/verify-pet-window.mjs --no-tray                     # 强制托盘创建失败，
+ *                                                                  # 验证「关窗即退出」兜底
+ *   node tools/verify-pet-window.mjs --exe release/win-unpacked/NexusLive2D.exe
+ *       # 打包版。这条是 asar 的唯一硬证据：窗口上有 NOACTIVATE
+ *       # 就说明原生模块 koffi 从 asar 里加载成功了（加载不上会静默降级，
+ *       # 那时这个位不会被设置）。
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -34,10 +41,19 @@ const argOf = (name, fallback) => {
 const has = (name) => args.includes(name)
 
 const URL_ = argOf('--url', '')
+const EXE = argOf('--exe', '')
+const NO_TRAY = has('--no-tray')
 const KEEP = has('--keep')
 const electron = require('electron')
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/** 后段（托盘失败兜底）用的断言。前段的窗口检查有自己的列表 */
+let failures = 0
+const check = (label, ok, detail = '') => {
+  console.log(`  ${ok ? '✓ ' : '✗ '} ${label}${detail ? ` —— ${detail}` : ''}`)
+  if (!ok) failures++
+}
 
 // ── Win32 ────────────────────────────────────────────────────────────
 
@@ -51,9 +67,11 @@ const GetWindowLongW = user32.func('int32 GetWindowLongW(uint64 hWnd, int32 nInd
 const GetWindowTextW = user32.func('int32 GetWindowTextW(uint64 hWnd, _Out_ uint16 *lp, int32 nMax)')
 const IsWindowVisible = user32.func('bool IsWindowVisible(uint64 hWnd)')
 const GetForegroundWindow = user32.func('uint64 GetForegroundWindow()')
+const PostMessageW = user32.func('bool PostMessageW(uint64 hWnd, uint32 Msg, uint64 wParam, int64 lParam)')
 
 const GWL_EXSTYLE = -20
 const GW_HWNDNEXT = 2
+const WM_CLOSE = 0x0010
 
 const EX_FLAGS = {
   WS_EX_DLGMODALFRAME: 0x00000001,
@@ -126,9 +144,13 @@ if (URL_) {
   // 不设的话主进程走 loadFile(dist/index.html)，顺带不会开 DevTools
   delete env.VITE_DEV_SERVER_URL
 }
+// 强制走「托盘建不起来」那条路（正常机器上这条分支跑不到，见 main.ts 里的钩子）
+if (NO_TRAY) env.NEXUS_NO_TRAY = '1'
 
-console.log('启动真实主进程…\n')
-const child = spawn(electron, ['.'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+console.log(EXE ? `启动打包后的可执行文件：${EXE}\n` : '启动真实主进程…\n')
+const child = EXE
+  ? spawn(EXE, [], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  : spawn(electron, ['.'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
 
 let stdout = ''
 child.stdout.on('data', (d) => {
@@ -184,9 +206,28 @@ if (lastError) {
   console.log(`  未置位 : ${off.join(', ') || '(无)'}`)
   console.log()
 
+  /*
+   * 透明那一条**不能**只认 WS_EX_LAYERED。
+   *
+   * Electron 在 Windows 上早就改用 DirectComposition 做透明窗口了（窗口带
+   * WS_EX_NOREDIRECTIONBITMAP、不带 WS_EX_LAYERED）—— 实测就是这条路径，
+   * 只认 LAYERED 会拿到一个假失败：样式看着"不对"，窗口其实是好的。
+   *
+   * 反过来也要说清楚：这两个位只能证明"没被切到普通不透明合成路径"，
+   * **证不了真的透明**。真要确认透明得看像素 ——
+   * --keep 留着窗口，比一眼窗口角落和后面的桌面。
+   */
+  const transparentPath = on.includes('WS_EX_LAYERED') || on.includes('WS_EX_NOREDIRECTIONBITMAP')
+
   const checks = [
     ['WS_EX_NOACTIVATE 已设置', on.includes('WS_EX_NOACTIVATE'), '点她不会抢走你正在打字的焦点'],
-    ['WS_EX_LAYERED 还在', on.includes('WS_EX_LAYERED'), '窗口还是透明的'],
+    [
+      '走的是透明合成路径',
+      transparentPath,
+      on.includes('WS_EX_NOREDIRECTIONBITMAP')
+        ? 'DirectComposition —— Electron 现在的默认路径'
+        : 'WS_EX_LAYERED —— 老路径',
+    ],
     ['WS_EX_TOPMOST 还在', on.includes('WS_EX_TOPMOST'), '还置顶'],
     ['扩展样式非 0', main.style !== 0, '没有被 GetWindowLongW 读到 0 后写坏'],
   ]
@@ -208,6 +249,36 @@ if (lastError) {
 
   console.log()
   console.log(allPass ? '全部通过 ✅' : '有项目没通过 ❌')
+}
+
+// ── 托盘创建失败那条路（--no-tray）─────────────────────────────────────
+/*
+ * 托盘建不起来时，绝不能留下「没有窗口、没有托盘、进程还在」的幽灵。
+ * 正常机器上这条分支走不到，所以主进程留了 NEXUS_NO_TRAY=1 的开关（见 main.ts）。
+ *
+ * 断言两件事：
+ *   ① 日志里明确报了失败（不是静默吞掉）
+ *   ② 发一个 WM_CLOSE 关掉窗口之后，进程真的退出了
+ *      —— 这是「关窗即退出」兜底生效的唯一硬证据
+ */
+if (NO_TRAY && !lastError && found.length) {
+  const main = found.find((w) => w.title) ?? found[0]
+
+  console.log()
+  console.log('='.repeat(62))
+  console.log('托盘失败兜底')
+  console.log('='.repeat(62))
+
+  check('托盘创建失败被接住并报了错', stdout.includes('托盘创建失败'))
+
+  PostMessageW(main.hwnd, WM_CLOSE, 0, 0)
+  const deadline = Date.now() + 9000
+  while (child.exitCode === null && Date.now() < deadline) await sleep(300)
+  const exited = child.exitCode !== null
+  check('关掉窗口后进程退出（没变成看不见的幽灵）', exited, exited ? `exit ${child.exitCode}` : '9 秒内还活着')
+  if (!exited) {
+    console.log('     ↑ 有托盘时窗口全关 ≠ 退出（这是对的），但托盘没建成时必须退')
+  }
 }
 
 // ── 主进程日志 ───────────────────────────────────────────────────────
@@ -236,3 +307,6 @@ if (!KEEP) {
 } else {
   console.log('\n窗口保留中，Ctrl+C 结束')
 }
+
+// 托盘兜底那几项没通过要体现在退出码里，否则 CI 里看不出来
+if (failures) process.exitCode = 1

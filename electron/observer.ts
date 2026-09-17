@@ -126,7 +126,7 @@ function ensureApi(): typeof api {
 
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
-function readForeground(): { process: string; title: string } | null {
+function readForeground(): { process: string; title: string; pid: number } | null {
   const fn = ensureApi()
   if (!fn) return null
 
@@ -146,16 +146,16 @@ function readForeground(): { process: string; title: string } | null {
   if (!pid) return null
 
   const handle = fn.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-  if (!handle) return { process: `pid:${pid}`, title }
+  if (!handle) return { process: `pid:${pid}`, title, pid }
 
   try {
     const pathBuf = new Uint16Array(1024)
     const sizeBuf = new Uint32Array([1024])
     const ok = fn.QueryFullProcessImageNameW(handle, 0, pathBuf, sizeBuf)
-    if (!ok || sizeBuf[0] === 0) return { process: `pid:${pid}`, title }
+    if (!ok || sizeBuf[0] === 0) return { process: `pid:${pid}`, title, pid }
 
     const full = Buffer.from(pathBuf.buffer, 0, sizeBuf[0] * 2).toString('utf16le')
-    return { process: basename(full), title }
+    return { process: basename(full), title, pid }
   } finally {
     fn.CloseHandle(handle)
   }
@@ -226,6 +226,19 @@ export class ActivityObserver {
 
     const raw = readForeground()
     if (!raw) return
+
+    /*
+     * ★ 她自己的窗口不算「他在干嘛」。
+     *
+     * 这一条是整块功能最容易踩空的地方：对话面板必须能打键盘，所以主进程
+     * 在面板打开时会 focus() —— 也就是说**他问「我在干嘛」的那一刻，
+     * 前台窗口恰恰是应用自己**。不排掉的话，她看到的永远是
+     * 「Nexus Live2D」，而且是在最该看准的那个场景里看错。
+     *
+     * 这里用 return 而不是清空 current：他自己的窗口不该把上一次真实的活动抹掉
+     * （他不是"不干什么了"，只是在跟她说话）。
+     */
+    if (raw.pid === process.pid) return
 
     // ★ 黑名单在这里拦。命中的连标题都不往 current 里放。
     if (this.isBlocked(raw.process, raw.title)) {

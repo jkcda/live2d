@@ -287,6 +287,14 @@ app.whenReady().then(() => {
   createWindow()
 
   try {
+    /*
+     * 验证钩子：NEXUS_NO_TRAY=1 强制走「托盘创建失败」那条路。
+     *
+     * 这条兜底在健康的机器上**没法自然触发**，而它恰恰是最该验的一段
+     * （失败了会变成看不见也关不掉的幽灵进程）。所以留一个显式的开关，
+     * 让 tools/verify-pet-window.mjs --no-tray 能真的跑到。
+     */
+    if (process.env.NEXUS_NO_TRAY) throw new Error('NEXUS_NO_TRAY 要求模拟托盘创建失败')
     createTray()
   } catch (err) {
     /*
