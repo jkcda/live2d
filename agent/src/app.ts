@@ -49,8 +49,22 @@ const server = app.listen(PORT, () => {
   void initMcp()
 })
 
-async function shutdown(): Promise<void> {
-  console.log('\n关闭中…')
+/*
+ * ★ 兜底：漏网的 rejection / 异常**不许把进程带走**。
+ *
+ * 实测撞到过：一次上游/ MCP 的连接抖动（日志里就一行 `[agent] 异常： Connection error.`），
+ * 异常从某个没有被 await 的地方冒出来，Node 直接退出进程 ——
+ * 表现是"她突然不会用工具了"，而用户完全不知道发生了什么（端口没了、界面只是变笨）。
+ * 留着日志、让服务活着，下一句对话还能用，比整个崩掉强得多。
+ */
+process.on('unhandledRejection', (reason) => {
+  console.error('[agent] 未处理的 rejection（已忽略，服务继续）：', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[agent] 未捕获异常（已忽略，服务继续）：', err)
+})
+
+async function shutdown(): Promise<void> {  console.log('\n关闭中…')
   await closeMcp()
   server.close(() => process.exit(0))
   // 兜底：3 秒还没退就强退（MCP 子进程偶尔不肯走）
