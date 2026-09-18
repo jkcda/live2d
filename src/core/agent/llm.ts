@@ -146,8 +146,16 @@ let splitMaxChars = 150
  * 比句子间的停顿更伤。
  *
  * 所以这个开关跟着引擎的 RTF 走，见 tts.ts 的 probeEngine。
+ *
+ * ★ 默认值是 `true`（逐句），这是刻意的保守选择 —— 和 streamMinChars 同一个道理：
+ *
+ * 探到引擎之前不知道它快不快。两个默认值各有各的错法：
+ *   · 默认整段 → 引擎慢的话，**第一次说话要等 25~34 秒**（用户以为她死了）
+ *   · 默认逐句 → 引擎快的话，只是语气稍微不那么连贯（**基本听不出来**）
+ *
+ * **不确定的时候选「错了也不明显」的那一侧。**
  */
-let splitBySentence = false
+let splitBySentence = true
 
 export function setSplitMode(bySentence: boolean): void {
   splitBySentence = bySentence
