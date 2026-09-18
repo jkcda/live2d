@@ -27,22 +27,26 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 }
 
 /**
- * 短于这个字数就整句合成，不流式。
+ * 短于这个字数就整句合成（不流式）。
  *
- * **为什么不一律流式**
+ * **这个值跟着引擎变**（见 probeEngine）：
  *
- *   · 短句本来就只出 1 块（实测「嗯，我在。」1 块、「好，我看看。」1 块）——
- *     流式没有任何收益可言
- *   · 而且流式拿不到「整段峰值归一化」，只能用开机标定的固定增益，
- *     音量比整句那条路略低（口型是按振幅驱动的，幅度也跟着小一点）
- *   · 整句合成时模型一次看到完整的一句，重音和语调是一次定下来的
+ *   快的引擎（云端 RTF 0.14） → 20   长文本走流式，早开口
+ *   慢的引擎（本地 RTF > 1）  → 极大  **永不流式**
  *
- * **为什么长句要流式**：实测 31 字首块 3.96s、总计 8.14s —— 省 4.18 秒。
+ * ★ 为什么慢引擎必须关掉流式
  *
- * 20 字是个折中：低于它的句子整句合成也就等 2~3 秒，不值得为它牺牲音质；
- * 高于它的句子等整段就明显了。
+ * **RTF > 1 时流式在数学上不可能不卡** —— 生产慢于消费，缓冲迟早耗尽。
+ * 实测：本地 51 字，13.4s 音频要 29.1s 合成，播放到一半必然停。
+ *
+ * 而「停在哪里」决定你听到什么：
+ *   · 流式 → 停在句子中间 ✗
+ *   · 整段缓冲（等合成完再播）→ 根本不出现停 ✓，代价是开口晚
+ *
+ * **RTF > 1 就没有「既早开口又不卡」的解。** 对陪伴来说，
+ * 一句话说到一半断掉比晚两秒开口伤得多 —— 所以慢引擎选后者。
  */
-const STREAM_MIN_CHARS = 20
+let streamMinChars = 20
 
 export class VoiceOutput {
   /** 播放队列尾；每句话挂到它后面，保证串行 */
@@ -91,13 +95,13 @@ export class VoiceOutput {
     void this.ensureEngineProbe()
 
     /*
-     * 短句整句、长句流式（见 STREAM_MIN_CHARS）。
+     * 短句整句、长句流式（阈值见 streamMinChars，**跟着引擎快慢走**）。
      *
      * ★ 两条路都**立刻发起**，不等队列轮到 —— 「合成并行、播放串行」
      *   是这个类的立身之本。等到队列才发起的话，前一句在播的时候
      *   后一句的合成根本没开始，每句之间都要重新等一遍首块，比不流水还慢。
      */
-    const short = text.length < STREAM_MIN_CHARS
+    const short = text.length < streamMinChars
     const whole = short ? this.synthesize(text, controller.signal) : null
     const opened = short ? null : this.openStream(text, controller.signal)
 
@@ -220,15 +224,28 @@ export class VoiceOutput {
       // cosyvoice-remote = 转发到本机那个模型（跑在同一块显卡上，RTF > 1）
       // openai / edge = 线上，快
       const slow = name.startsWith('cosyvoice')
-      const next = slow ? 24 : 150
 
-      // 变了才打日志 —— 排查「为什么还是断」时这一行是关键
-      if (next !== getSplitMaxChars()) {
+      /*
+       * 慢引擎两件事一起改，缺一不可：
+       *
+       *   ① 切短（24 字）—— 让段与段之间的停顿落在句号处
+       *   ② **关掉流式**（阈值调到不可能达到）—— 段内也不再断
+       *
+       * ★ 我第一版只改了 ①，结果用户还是听到中间断 —— 因为 24 字 > 20 字，
+       *   每一小段照样走 /tts/stream，段内还是流式、还是卡。
+       *   **切短只是把「卡」变小了，没消掉。**
+       */
+      const nextSplit = slow ? 24 : 150
+      const nextStreamMin = slow ? Number.MAX_SAFE_INTEGER : 20
+
+      if (nextSplit !== getSplitMaxChars()) {
         console.log(
-          `[tts] 引擎 ${name} → 每段最多 ${next} 字（${slow ? '本地，切短让停顿落在句号处' : '线上，整段合成'}）`,
+          `[tts] 引擎 ${name} → 每段最多 ${nextSplit} 字` +
+            `｜${slow ? '不流式（RTF > 1，流式必卡）' : '长段走流式'}`,
         )
       }
-      setSplitMaxChars(next)
+      setSplitMaxChars(nextSplit)
+      streamMinChars = nextStreamMin
       return name
     } catch {
       // 服务没起来：不改，保持现值
