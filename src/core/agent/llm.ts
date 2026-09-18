@@ -105,8 +105,6 @@ export async function* streamChat(
  */
 export function createSentenceSplitter() {
   let pending = ''
-  /** 还没吐过第一句 —— 首句允许在逗号处提前切，让声音早一点出来 */
-  let first = true
 
   return {
     /** 喂入增量，返回本次可以送去合成的完整句子（可能为空数组） */
@@ -129,33 +127,31 @@ export function createSentenceSplitter() {
       pending = pending.slice(lastIndex)
 
       /*
-       * ★ 首句在逗号处提前切一小段。
+       * ★ 这里原来有一段「首句在逗号处提前切一小段」—— 已经删掉。
        *
-       * 为什么专门为「第一句」破例：合成比播放慢的时候（实测 RTF 能到 1.5 上下，
-       * GPU 一忙更慢），30 字的一句 ≈ 6 秒音频 ≈ 9 秒合成 ——
-       * 等他听到第一个字，文字早就整段显示完了，听起来就是"她根本没说话"。
-       * 首句切短能把这等待砍掉一大半；后面的句子按句号切，语气是完整的。
+       * 它当时是为了压低首音延迟（整句合成慢的时候，30 字要等 9 秒）。
+       * 但它让**每次回复的第一句都断成两截**，而每一截都是**独立的 TTS 调用**：
+       * 各自有完整的语调收尾和停顿，于是听起来就是「话还没说完一句就停了」。
+       * 用户的原话：「老是说话还没说完一句就停了」。
+       *
+       * 现在有端到端流式了 —— 长句靠它早出声，不用再靠切碎来抢时间。
+       * **切分只按句末标点，不碰逗号。**
        */
-      if (first) {
-        const m = /^(.{8,}?)[，,、]/.exec(pending)
-        if (m) {
-          out.push(m[1].trim())
-          pending = pending.slice(m[0].length)
-        }
-      }
 
       /*
        * 兜底：单句过长（模型不吐标点）时强切，避免一直不发声。
        *
-       * 30 字是权衡：原来 60 字时一句要合成十几秒，"话赶不上嘴"非常明显；
-       * 再短又会在句子中间切开发音，语气变碎。
+       * 60 字。曾经改成过 30 字（也是为延迟），但那会在句子中间切开发音 ——
+       * 一句话被切成两段各自合成，语气是断的。
+       *
+       * **宁可等，也不要碎。** 真遇到 60 字不吐标点的情况，流式会保证首块先出来，
+       * 不需要靠强切来抢那点时间。
        */
-      if (pending.length >= 30) {
+      if (pending.length >= 60) {
         out.push(pending.trim())
         pending = ''
       }
 
-      if (out.length) first = false
       return out
     },
 
@@ -163,7 +159,6 @@ export function createSentenceSplitter() {
     flush(): string {
       const rest = pending.trim()
       pending = ''
-      first = true
       return rest
     },
   }

@@ -25,6 +25,24 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   speed: 1,
 }
 
+/**
+ * 短于这个字数就整句合成，不流式。
+ *
+ * **为什么不一律流式**
+ *
+ *   · 短句本来就只出 1 块（实测「嗯，我在。」1 块、「好，我看看。」1 块）——
+ *     流式没有任何收益可言
+ *   · 而且流式拿不到「整段峰值归一化」，只能用开机标定的固定增益，
+ *     音量比整句那条路略低（口型是按振幅驱动的，幅度也跟着小一点）
+ *   · 整句合成时模型一次看到完整的一句，重音和语调是一次定下来的
+ *
+ * **为什么长句要流式**：实测 31 字首块 3.96s、总计 8.14s —— 省 4.18 秒。
+ *
+ * 20 字是个折中：低于它的句子整句合成也就等 2~3 秒，不值得为它牺牲音质；
+ * 高于它的句子等整段就明显了。
+ */
+const STREAM_MIN_CHARS = 20
+
 export class VoiceOutput {
   /** 播放队列尾；每句话挂到它后面，保证串行 */
   private queue: Promise<void> = Promise.resolve()
@@ -60,17 +78,31 @@ export class VoiceOutput {
     const controller = this.ensureController()
     this.pending++
 
-    // 关键：先发起（不 await），再挂到播放链尾 —— 合成与播放解耦。
-    // 流式下这一点更重要：请求发出去之后，服务端会先把首块产出到 socket 缓冲里，
-    // 等队列轮到这一句时，首块已经在本地了。
-    const opened = this.openStream(text, controller.signal)
+    /*
+     * 短句整句、长句流式（见 STREAM_MIN_CHARS）。
+     *
+     * ★ 两条路都**立刻发起**，不等队列轮到 —— 「合成并行、播放串行」
+     *   是这个类的立身之本。等到队列才发起的话，前一句在播的时候
+     *   后一句的合成根本没开始，每句之间都要重新等一遍首块，比不流水还慢。
+     */
+    const short = text.length < STREAM_MIN_CHARS
+    const whole = short ? this.synthesize(text, controller.signal) : null
+    const opened = short ? null : this.openStream(text, controller.signal)
 
     this.queue = this.queue
       .then(async () => {
         // 这一句在排队期间被打断了，直接丢弃
         if (gen !== this.generation) return
 
-        const result = await opened
+        // 短句：整段合成 → 一次播完（拿得到整段峰值归一化）
+        if (whole) {
+          const buffer = await whole
+          if (!buffer || gen !== this.generation) return
+          await this.player.playBufferAndWait(buffer)
+          return
+        }
+
+        const result = await opened!
 
         /*
          * ★ 被打断时**必须把响应体取消掉**。
