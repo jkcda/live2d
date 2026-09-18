@@ -70,22 +70,160 @@ export function bargeIn(): void {
 type EventHandler = (event: StreamEvent) => void
 type StatusHandler = (status: VoiceInputStatus, detail?: string) => void
 
-let voiceEventHandler: EventHandler | null = null
-let voiceStatusHandler: StatusHandler | null = null
+/*
+ * ★ 订阅用 Set（多handler），不是单个字段。
+ *
+ * 原来是「一个字段 + 覆盖」—— 那意味着**只能有一个订阅者**：
+ * runtime 自己挂一个，面板再挂一个就把前一个顶掉了，
+ * 而且不报错（表现是「某个地方莫名其妙收不到事件」）。
+ *
+ * 语音现在有两个消费方：面板（画波形/状态）和 runtime（收尾 + 发给她）。
+ * 所以必须是多播。
+ */
+const voiceEventHandlers = new Set<EventHandler>()
+const voiceStatusHandlers = new Set<StatusHandler>()
 
 /** 订阅语音输入事件。返回取消订阅函数。 */
 export function subscribeVoiceEvents(handler: EventHandler): () => void {
-  voiceEventHandler = handler
+  voiceEventHandlers.add(handler)
   return () => {
-    if (voiceEventHandler === handler) voiceEventHandler = null
+    voiceEventHandlers.delete(handler)
   }
 }
 
 export function subscribeVoiceStatus(handler: StatusHandler): () => void {
-  voiceStatusHandler = handler
+  voiceStatusHandlers.add(handler)
   return () => {
-    if (voiceStatusHandler === handler) voiceStatusHandler = null
+    voiceStatusHandlers.delete(handler)
   }
+}
+
+// ---------------------------------------------------------------- 语音回合
+
+/**
+ * 语音回合的状态。
+ *
+ * 「按一次开始录、再按一次结束」—— **快捷键和面板按钮走同一条路**，
+ * 免得两边各有一套状态机（那必然会出现「面板显示在录、其实没录」这种事）。
+ */
+export type VoiceRoundState = 'idle' | 'recording' | 'recognizing'
+
+let roundState: VoiceRoundState = 'idle'
+const roundHandlers = new Set<(s: VoiceRoundState) => void>()
+
+function setRoundState(s: VoiceRoundState): void {
+  if (roundState === s) return
+  roundState = s
+  for (const fn of roundHandlers) fn(s)
+}
+
+export function subscribeVoiceRound(handler: (s: VoiceRoundState) => void): () => void {
+  roundHandlers.add(handler)
+  handler(roundState) // 立即回放当前状态，订阅方不用自己初始化
+  return () => {
+    roundHandlers.delete(handler)
+  }
+}
+
+/**
+ * 一轮对话的广播事件。
+ *
+ * ★ 为什么要有它：**发消息的入口不止一个**
+ *
+ *   · 面板里打字 / 点麦克风
+ *   · 全局快捷键直接说话（面板可能压根没挂载）
+ *
+ * 如果每个入口自己驱动会话、自己渲染，就会有两套渲染逻辑，
+ * 而且必然出现「快捷键说的那句话，面板里看不到」这种。
+ *
+ * 所以：**runtime 负责发，面板负责画**，中间用这个广播接上。
+ * 面板不再直接调 `chatSession.send()`。
+ */
+export type TurnEvent =
+  | { type: 'start'; text: string }
+  | { type: 'agent'; event: AgentEvent }
+  | { type: 'end' }
+
+const turnHandlers = new Set<(e: TurnEvent) => void>()
+
+export function subscribeTurns(handler: (e: TurnEvent) => void): () => void {
+  turnHandlers.add(handler)
+  return () => {
+    turnHandlers.delete(handler)
+  }
+}
+
+function emitTurn(e: TurnEvent): void {
+  for (const fn of turnHandlers) fn(e)
+}
+
+/**
+ * 把一轮话发给她 —— **所有入口都走这里**。
+ *
+ * 只负责驱动会话（写历史 + 触发 TTS 那条 hook）并广播事件；
+ * **渲染由订阅方负责**（面板订阅了 `subscribeTurns`）。
+ */
+let turnBusy = false
+
+export async function sendTurn(text: string): Promise<void> {
+  const trimmed = text.trim()
+  if (!trimmed || turnBusy) return
+
+  turnBusy = true
+  emitTurn({ type: 'start', text: trimmed })
+  try {
+    for await (const event of chatSession.send(trimmed)) {
+      emitTurn({ type: 'agent', event })
+    }
+  } catch (err) {
+    console.warn('[turn] 这一轮失败', err)
+  } finally {
+    turnBusy = false
+    emitTurn({ type: 'end' })
+  }
+}
+
+/** 一轮是不是还在跑（面板据此禁用输入框） */
+export function turnInFlight(): boolean {
+  return turnBusy
+}
+
+/**
+ * 按一次开始录、再按一次结束。
+ *
+ * ★ 为什么它在 runtime 而不是 ChatPanel
+ *
+ * 因为「按快捷键直接说话」时对话面板是关着的，挂在面板里麦克风根本不存在。
+ * **语音是一条独立的入口，和打字平级**，不该寄居在打字面板里。
+ */
+export async function toggleVoiceRound(): Promise<void> {
+  if (roundState === 'recording') {
+    setRoundState('recognizing')
+    voiceInput.finish()
+    // 兜底：3 秒还没等到 asr 就强行断开，别把麦克风一直占着
+    window.setTimeout(() => {
+      if (roundState === 'recognizing') {
+        voiceInput.stop()
+        setRoundState('idle')
+      }
+    }, 3000)
+    return
+  }
+
+  if (roundState !== 'idle') return // 识别中，别插队
+
+  try {
+    await voiceInput.start()
+    setRoundState('recording')
+  } catch (err) {
+    console.warn('[voice] 开麦失败', err)
+    setRoundState('idle')
+  }
+}
+
+/** 当前语音回合状态（面板用来画按钮） */
+export function voiceRoundState(): VoiceRoundState {
+  return roundState
 }
 
 export const voiceInput = new VoiceInput({
@@ -98,13 +236,51 @@ export const voiceInput = new VoiceInput({
       bargeIn()
     }
 
-    voiceEventHandler?.(event)
+    /*
+     * 语音回合的收尾。**必须在 runtime 做**，不能在面板里 ——
+     * 快捷键录音时面板是关着的（v-if 卸载），它收不到这个事件。
+     *
+     * 顺序：先关麦，再发文字。反过来的话麦克风还开着，
+     * 她的回复会被自己听到、触发 barge-in 把自己掐断。
+     */
+    if (roundState === 'recognizing') {
+      if (event.type === 'asr') {
+        voiceInput.stop()
+        setRoundState('idle')
+        void sendTurn(event.text)
+      } else if (event.type === 'error') {
+        voiceInput.stop()
+        setRoundState('idle')
+      }
+    }
+
+    for (const fn of voiceEventHandlers) fn(event)
   },
 
   onStatus(status, detail) {
-    voiceStatusHandler?.(status, detail)
+    for (const fn of voiceStatusHandlers) fn(status, detail)
   },
 })
+
+// ---------------------------------------------------------------- 快捷键
+
+/*
+ * 订阅「语音回合」快捷键（默认 Ctrl+Shift+V）。
+ *
+ * ★ 为什么在 runtime 订阅，不在组件里
+ *
+ * 这个快捷键的全部价值就在于**面板关着也能用** —— 而面板是 `v-if` 的，
+ * 关着就整个卸载了。挂它上面等于只在「面板已经开着」时才有效，
+ * 那还不如直接点面板上的按钮。
+ *
+ * 浏览器版没有 `window.nexus`（那是 Electron 的桥），所以这里判空跳过 ——
+ * 浏览器里用面板上那个麦克风按钮，走的是同一个 `toggleVoiceRound()`。
+ */
+if (typeof window !== 'undefined' && window.nexus?.onToggleVoice) {
+  window.nexus.onToggleVoice(() => {
+    void toggleVoiceRound()
+  })
+}
 
 // ---------------------------------------------------------------- 配置
 

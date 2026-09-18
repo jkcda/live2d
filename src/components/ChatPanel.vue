@@ -4,8 +4,14 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
   bargeIn,
   chatSession,
+  sendTurn,
+  subscribeTurns,
   subscribeVoiceEvents,
+  subscribeVoiceRound,
   subscribeVoiceStatus,
+  toggleVoiceRound,
+  type TurnEvent,
+  type VoiceRoundState,
   voiceInput,
 } from '@/core/runtime'
 import type { VoiceInputStatus } from '@/core/audio/stream'
@@ -132,13 +138,13 @@ const micOn = ref(false)
 const voiceStatus = ref<VoiceInputStatus>('idle')
 const hearing = ref(false)
 const recognizing = ref(false)
-/** 手动结束中：已发 flush、正等识别结果回来 */
-const finishing = ref(false)
 
 const name = DEFAULT_PERSONA.name
 
 let unsubscribeEvents: (() => void) | null = null
 let unsubscribeStatus: (() => void) | null = null
+let unsubscribeTurns: (() => void) | null = null
+let unsubscribeRound: (() => void) | null = null
 
 onMounted(() => {
   inputEl.value?.focus()
@@ -171,6 +177,22 @@ onMounted(() => {
     }
   })()
 
+  /*
+   * 一轮对话的渲染。打字 / 麦克风 / 快捷键三个入口的消息都从这里过 ——
+   * 所以三条路的显示必然一致。
+   */
+  unsubscribeTurns = subscribeTurns(onTurn)
+
+  /*
+   * 语音回合状态（唯一的一份状态机在 runtime）。
+   * 面板只是读它、画按钮 —— 不再自己维护 micOn。
+   */
+  unsubscribeRound = subscribeVoiceRound((state: VoiceRoundState) => {
+    micOn.value = state !== 'idle'
+    recognizing.value = state === 'recognizing'
+    if (state === 'idle') hearing.value = false
+  })
+
   unsubscribeStatus = subscribeVoiceStatus((status, detail) => {
     voiceStatus.value = status
     if (status === 'error') error.value = detail ?? '语音输入出错'
@@ -188,25 +210,14 @@ onMounted(() => {
       recognizing.value = true
     } else if (event.type === 'asr') {
       recognizing.value = false
-
       /*
-       * 手动模式下，识别结果是「这一轮的终点」：
-       * 收到它才断开麦克风，然后才把文字发出去。
+       * ★ 这里**不再发消息**。
        *
-       * 顺序不能反 —— 麦克风还开着的话，她的回复会被自己听到、
-       * 触发 barge-in 把自己掐断（表现是「她刚开口就停」）。
+       * 「识别结果 → 关麦 → 发给她」整条链在 runtime 里（见 voiceInput 的
+       * onEvent）—— 因为快捷键说话时这个面板压根没挂载，收不到这个事件。
+       * 在这里再发一次就是**发两遍**。
        */
-      if (finishing.value) {
-        finishing.value = false
-        voiceInput.stop()
-      }
-
-      const text = event.text.trim()
-      if (text) {
-        void sendText(text)
-      } else if (micOn.value) {
-        error.value = '没听清，再说一次？'
-      }
+      if (!event.text.trim() && micOn.value) error.value = '没听清，再说一次？'
     } else if (event.type === 'error') {
       recognizing.value = false
       error.value = event.message
@@ -217,6 +228,8 @@ onMounted(() => {
 onUnmounted(() => {
   unsubscribeEvents?.()
   unsubscribeStatus?.()
+  unsubscribeTurns?.()
+  unsubscribeRound?.()
   voiceInput.stop()
 })
 
@@ -227,6 +240,17 @@ function scrollToBottom() {
   })
 }
 
+/**
+ * 发一句话。
+ *
+ * ★ 它**不再自己驱动会话** —— 只做前置检查，然后交给 runtime 的 `sendTurn()`。
+ *
+ * 原因：发消息的入口不止这一个（还有全局快捷键直接说话，那时面板压根没挂载）。
+ * 每个入口自己驱动会话 = 两套渲染逻辑，而且必然出现
+ * 「快捷键说的那句，面板里看不到」。
+ *
+ * 现在：**runtime 负责发，面板负责画**，中间用 `subscribeTurns` 接上。
+ */
 async function sendText(text: string) {
   const trimmed = text.trim()
   if (!trimmed || busy.value) return
@@ -238,51 +262,68 @@ async function sendText(text: string) {
   }
 
   error.value = ''
-  busy.value = true
+  await sendTurn(trimmed)
+}
 
-  bubbles.value.push({ role: 'user', text: trimmed })
-  bubbles.value.push({ role: 'assistant', text: '' })
-  const replyIndex = bubbles.value.length - 1
-  scrollToBottom()
+/**
+ * 把 runtime 广播的那一轮事件画成气泡。
+ *
+ * 打字、点麦克风、按快捷键 —— 三个入口的消息都从这里过，
+ * 所以三条路的显示效果**必然一致**（不会出现「快捷键发的看不到」）。
+ */
+function onTurn(e: TurnEvent) {
+  if (e.type === 'start') {
+    error.value = ''
+    busy.value = true
+    bubbles.value.push({ role: 'user', text: e.text })
+    bubbles.value.push({ role: 'assistant', text: '' })
+    scrollToBottom()
+    return
+  }
 
-  try {
-    for await (const ev of chatSession.send(trimmed)) {
-      if (ev.type === 'delta') {
-        // 必须经由数组下标写入才能触发响应式 —— 直接改局部变量对象不会更新视图
-        bubbles.value[replyIndex].text += ev.content
-        scrollToBottom()
-      } else if (ev.type === 'tool_call') {
-        /*
-         * 工具调用要**当场显示**：agent 干活可能要好几秒（联网、开浏览器），
-         * 这段时间界面如果不给任何反馈，用户看到的就是"她卡住了/她变笨了"。
-         */
-        const chip: ToolChip = {
-          label: toolLabel(ev.tool),
-          summary: toolSummary(ev.args),
-          status: 'running',
-        }
-        const cur = bubbles.value[replyIndex]
-        cur.chips = [...(cur.chips ?? []), chip]
-        scrollToBottom()
-      } else if (ev.type === 'tool_result') {
-        // 把最后一个"进行中"的 chip 标成完成（同一个工具可能被调多次）
-        const chips = bubbles.value[replyIndex].chips ?? []
-        for (let i = chips.length - 1; i >= 0; i--) {
-          if (chips[i].status === 'running') {
-            chips[i].status = 'done'
-            break
-          }
-        }
-      } else if (ev.type === 'error') {
-        error.value = ev.message
-        bubbles.value[replyIndex].failed = true
-      }
-    }
-  } finally {
+  if (e.type === 'end') {
     busy.value = false
     // 一个字都没吐出来就说明这轮没成，把空泡删掉免得留个空气泡
-    if (!bubbles.value[replyIndex].text) bubbles.value.splice(replyIndex, 1)
+    const last = bubbles.value[bubbles.value.length - 1]
+    if (last && last.role === 'assistant' && !last.text) bubbles.value.pop()
     scrollToBottom()
+    return
+  }
+
+  // ---- 以下是 agent 事件 ----
+  const replyIndex = bubbles.value.length - 1
+  if (replyIndex < 0) return
+  const ev = e.event
+
+  if (ev.type === 'delta') {
+    // 必须经由数组下标写入才能触发响应式 —— 直接改局部变量对象不会更新视图
+    bubbles.value[replyIndex].text += ev.content
+    scrollToBottom()
+  } else if (ev.type === 'tool_call') {
+    /*
+     * 工具调用要**当场显示**：agent 干活可能要好几秒（联网、开浏览器），
+     * 这段时间界面如果不给任何反馈，用户看到的就是"她卡住了/她变笨了"。
+     */
+    const chip: ToolChip = {
+      label: toolLabel(ev.tool),
+      summary: toolSummary(ev.args),
+      status: 'running',
+    }
+    const cur = bubbles.value[replyIndex]
+    cur.chips = [...(cur.chips ?? []), chip]
+    scrollToBottom()
+  } else if (ev.type === 'tool_result') {
+    // 把最后一个"进行中"的 chip 标成完成（同一个工具可能被调多次）
+    const chips = bubbles.value[replyIndex].chips ?? []
+    for (let i = chips.length - 1; i >= 0; i--) {
+      if (chips[i].status === 'running') {
+        chips[i].status = 'done'
+        break
+      }
+    }
+  } else if (ev.type === 'error') {
+    error.value = ev.message
+    bubbles.value[replyIndex].failed = true
   }
 }
 
@@ -299,44 +340,17 @@ function stop() {
   busy.value = false
 }
 
-async function toggleMic() {
-  if (micOn.value) {
-    /*
-     * ★ 手动结束这一轮说话。
-     *
-     * 不能直接 `voiceInput.stop()` —— 那会把还在路上的识别结果一起掐掉
-     * （服务端要几百毫秒才能把音频转成文字）。
-     *
-     * 也不能「先改状态就完事」：麦克风得真的关掉，否则她的回复
-     * 会被自己的麦克风听到、触发 barge-in 掐断自己。
-     *
-     * 所以顺序是：发 flush → 等服务端回 asr → 断开 → 再把文字发出去。
-     */
-    micOn.value = false
-    hearing.value = false
-    recognizing.value = true
-    finishing.value = true
-    voiceInput.finish()
-
-    // 兜底：3 秒还没等到 asr 就断开，别把麦克风一直占着
-    window.setTimeout(() => {
-      if (finishing.value) {
-        finishing.value = false
-        recognizing.value = false
-        voiceInput.stop()
-      }
-    }, 3000)
-    return
-  }
-
-  error.value = ''
-  try {
-    await voiceInput.start()
-    micOn.value = true
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
-    micOn.value = false
-  }
+/**
+ * 麦克风按钮。
+ *
+ * ★ 它和快捷键（Ctrl+Shift+V）走的是**同一个** `toggleVoiceRound()`。
+ *
+ * 这里曾经有一套自己的状态机（`finishing` 标志、3 秒兜底、手动顺序……），
+ * 和 runtime 那套并行 —— 那是必然要出「面板显示在录、其实没录」这类事的。
+ * 现在**只有一份状态机在 runtime**，面板只是读它、画它。
+ */
+function toggleMic() {
+  void toggleVoiceRound()
 }
 
 function onKeydown(e: KeyboardEvent) {

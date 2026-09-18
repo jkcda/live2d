@@ -73,6 +73,20 @@ contextBridge.exposeInMainWorld('nexus', {
   },
 
   /**
+   * 订阅「语音回合」快捷键（默认 Ctrl+Shift+V）。
+   *
+   * 按一次开始录、再按一次结束。**窗口不用显示** —— 渲染进程在隐藏状态下
+   * 照样活着（主进程里 backgroundThrottling 关掉了）。
+   */
+  onToggleVoice: (handler: () => void) => {
+    const listener = () => handler()
+    ipcRenderer.on('voice:toggle', listener)
+    return () => {
+      ipcRenderer.removeListener('voice:toggle', listener)
+    }
+  },
+
+  /**
    * 报告「穿透态下哪一块还能点」（窗口内的 CSS 像素矩形），退出穿透时传 null。
    *
    * 穿透时窗口整个在忽略鼠标，主进程靠这个矩形 + 全局光标位置

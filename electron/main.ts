@@ -237,6 +237,16 @@ function createWindow() {
       preload: join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      /*
+       * ★ 必须关掉后台节流。
+       *
+       * 默认是 true —— 窗口一隐藏，Chromium 就把这个页面的定时器和
+       * requestAnimationFrame 降频（甚至冻结）。而「按快捷键直接说话」
+       * 这条路**恰恰是在窗口隐藏时用的**：
+       * 采麦克风、喂 WebSocket、等识别结果，全靠渲染进程的定时器在跑。
+       * 节流一开，录出来的就是断断续续的音频。
+       */
+      backgroundThrottling: false,
     },
   })
 
@@ -616,6 +626,27 @@ app.whenReady().then(() => {
   // 全局快捷键：H 显隐，Q 退出
   globalShortcut.register('CommandOrControl+Shift+H', () => {
     toggleWindow()
+  })
+
+  /*
+   * 语音回合：按一次开始录、再按一次结束。
+   *
+   * ★ 为什么走 IPC 转给渲染进程，而不是主进程自己录
+   *
+   * 麦克风采集要用浏览器的 `getUserMedia`，那是渲染进程的能力。
+   * 主进程能做的只是「把这个按键事件递进去」。
+   *
+   * ★ 窗口**不需要显示**。渲染进程在隐藏状态下照样活着
+   *   （`backgroundThrottling: false` 保住了它的定时器），
+   *   所以这条路的体验是：按一下 → 说话 → 再按一下 → 她直接出声回答。
+   *   全程不弹窗。
+   *
+   * ★ 用 `webContents.send` 而不是 `win.show()` + 模拟点击：
+   *   弹窗会把前台窗口抢走，而**她看屏幕靠的就是前台窗口** ——
+   *   一弹窗，她看到的就变成自己了（见 observer.ts 里 isObservable 的注释）。
+   */
+  globalShortcut.register('CommandOrControl+Shift+V', () => {
+    win?.webContents.send('voice:toggle')
   })
 
   globalShortcut.register('CommandOrControl+Shift+Q', () => {

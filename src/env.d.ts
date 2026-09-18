@@ -79,6 +79,12 @@ interface NexusAPI {
   /** 订阅托盘菜单的「打开面板」请求。返回取消订阅函数。 */
   onOpenPanel: (handler: (panel: 'chat' | 'settings') => void) => () => void
 
+  /**
+   * 订阅「语音回合」快捷键（Ctrl+Shift+V）。
+   * 按一次开始录、再按一次结束 —— 窗口不用显示。
+   */
+  onToggleVoice: (handler: () => void) => () => void
+
   /** 订阅「窗口重新显示，悬停状态该复位」。返回取消订阅函数。 */
   onResetHover: (handler: () => void) => () => void
 
