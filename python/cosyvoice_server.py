@@ -140,16 +140,25 @@ def discover_voices() -> list[tuple[str, Path, str]]:
     return found
 
 
-def load_model(fp16: bool) -> None:
+def load_model(fp16: bool, jit: bool = False) -> None:
     global model, sample_rate
     if not MODEL_DIR.exists():
         raise SystemExit(f"找不到模型目录：{MODEL_DIR}")
 
     t0 = time.time()
-    model = CosyVoice2(str(MODEL_DIR), load_jit=False, load_trt=False, fp16=fp16)
+    # load_trt 保持关着：本机没装 tensorrt（ModuleNotFoundError），
+    # 而且 CosyVoice 的 TRT 路径（runtime/triton_trtllm/）是给 Triton 容器用的，
+    # 进程内开它并不是官方主推的用法。
+    model = CosyVoice2(str(MODEL_DIR), load_jit=jit, load_trt=False, fp16=fp16)
     sample_rate = model.sample_rate
     vram = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0
-    log.info("模型加载完成 %.1fs（%.2f GB 显存，%d Hz）", time.time() - t0, vram, sample_rate)
+    log.info(
+        "模型加载完成 %.1fs（%.2f GB 显存，%d Hz，jit=%s）",
+        time.time() - t0,
+        vram,
+        sample_rate,
+        jit,
+    )
 
     # 注册音色：用户的优先，一个都没有就用自带示例
     voices = discover_voices()
@@ -407,10 +416,18 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.environ.get("NEXUS_COSY_PORT", 8788)))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--fp32", action="store_true", help="关掉 fp16（更慢、更占显存，一般不需要）")
+    parser.add_argument(
+        "--jit",
+        action="store_true",
+        default=os.environ.get("NEXUS_COSY_JIT") == "1",
+        help="开启 JIT 融合（也可用环境变量 NEXUS_COSY_JIT=1，方便从启动脚本控制）。"
+        "本机实测能加载（11.2s vs 基线 18.2s），但推理快多少要自己量 —— "
+        "打开前后各跑几轮，比日志里的 RTF。",
+    )
     args = parser.parse_args()
 
     log.info("CosyVoice 2 服务启动中（模型目录 %s）", MODEL_DIR)
-    load_model(fp16=not args.fp32)
+    load_model(fp16=not args.fp32, jit=args.jit)
     log.info("就绪：http://%s:%d/tts", args.host, args.port)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 

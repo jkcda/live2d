@@ -19,6 +19,16 @@ $root = Split-Path -Parent $PSScriptRoot
 $logs = Join-Path $root "logs"
 $pidFile = Join-Path $logs "pids.json"
 
+<#
+  允许 `-Only agent,web` 这种逗号写法 —— 理由同 start-all.ps1：
+  经过 .cmd 包装转发时整个 "agent,web" 是一个字符串，不拆开就匹配不上，
+  表现是「写了 -Only 却把全部停了」，而且不报错。
+#>
+$Only = @($Only) |
+  ForEach-Object { $_ -split ',' } |
+  ForEach-Object { $_.Trim() } |
+  Where-Object { $_ }
+
 function Stop-Port([int]$port, [string]$name) {
   $owners = (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique
   $hit = 0
