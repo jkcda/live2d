@@ -27,9 +27,6 @@ export interface HistoryMessage {
   content: string
 }
 
-/** 超过这个轮数（1 轮 = user + assistant）才开始压缩 */
-const COMPACT_AFTER_ROUNDS = 30
-
 function ensureDir(): void {
   if (!fs.existsSync(COMPACTION_DIR)) fs.mkdirSync(COMPACTION_DIR, { recursive: true })
 }
@@ -104,6 +101,55 @@ ${SECTIONS}
  * 摘要是优化，聊不下去才是事故。
  */
 /**
+ * 压缩的触发条件是「**快到上下文上限**」，不是「聊了多少条」。
+ *
+ * 这两件事在现代模型上差得很远：128k 窗口装得下几千条对话，
+ * 而按条数触发（原来是 60 条 ≈ 5k token，离上限差 25 倍）等于
+ * 每聊几轮就白花一次摘要的 LLM 调用，还把本来能看见的上下文丢掉了。
+ *
+ * 用户的原话：「现在 ai 都 1m 上下文了，一般是快到上下文上限才压缩出摘要吧」。
+ * 按条数触发是**用旧时代的约束做今天的决定**。
+ */
+const CONTEXT_WINDOW_TOKENS = 128_000
+
+/** 用到窗口的这个比例才开始压缩（留出回复本身的空间） */
+const COMPACT_AT_RATIO = 0.6
+
+/** 压缩后保留最近这么多 token 的原文 —— 摘要替掉的是更早的那些 */
+const KEEP_TOKENS = 32_000
+
+/**
+ * 粗估 token 数。
+ *
+ * 故意不引 tokenizer：中文约 1 字 1 token、英文约 4 字符 1 token，
+ * 这里统一按 **每字符 0.75 token** 估。
+ * 估大了只是早点压缩（浪费一点），估小了才会撑爆上下文 —— 所以取保守的。
+ */
+function estimateTokens(messages: HistoryMessage[]): number {
+  let chars = 0
+  for (const m of messages) chars += m.content.length
+  return Math.ceil(chars * 0.75)
+}
+
+/** 从后往前取，攒够 keepTokens 就停 */
+function recentWithin(messages: HistoryMessage[], keepTokens: number): HistoryMessage[] {
+  let used = 0
+  let i = messages.length
+  while (i > 0) {
+    const len = messages[i - 1].content.length
+    if (used + len > keepTokens && i < messages.length) break
+    used += len
+    i--
+  }
+  return messages.slice(i)
+}
+
+/** 该不该压缩 —— 按 token 估，不按条数 */
+function needsCompaction(messages: HistoryMessage[]): boolean {
+  return estimateTokens(messages) > CONTEXT_WINDOW_TOKENS * COMPACT_AT_RATIO
+}
+
+/**
  * 只用**已有的**摘要裁剪历史 —— 不调模型，快到可以放在请求路径上。
  *
  * ★ 为什么要把「应用」和「生成」拆开
@@ -115,24 +161,22 @@ ${SECTIONS}
  * 摘要是**优化**，不是回复的前提：这一轮先用上次的摘要（或者干脆不裁），
  * 摘要本身放到回复发完之后慢慢算。
  *
- * 没有摘要时**返回原样**，不为了生成它卡住回复 —— 多花点 token 比让用户等 47 秒强。
+ * 没到该压缩的程度、或者还没有摘要时，**原样返回** ——
+ * 多花点 token 比让用户等 47 秒强。
  */
 export function applyCompaction(
   messages: HistoryMessage[],
   sessionId: string,
-  recentRounds = COMPACT_AFTER_ROUNDS,
 ): HistoryMessage[] {
   if (messages.length === 0) return messages
-
-  const keepCount = recentRounds * 2
-  if (messages.length <= keepCount) return messages
+  if (!needsCompaction(messages)) return messages
 
   const summary = loadCompaction(sessionId)
   if (!summary) return messages
 
   return [
     { role: 'user', content: `[之前聊过的（摘要）]\n${summary}` },
-    ...messages.slice(-keepCount),
+    ...recentWithin(messages, KEEP_TOKENS),
   ]
 }
 
@@ -140,15 +184,12 @@ export async function compactHistory(
   messages: HistoryMessage[],
   sessionId: string,
   llm: LLMConfig,
-  recentRounds = COMPACT_AFTER_ROUNDS,
 ): Promise<HistoryMessage[]> {
   if (messages.length === 0) return messages
+  if (!needsCompaction(messages)) return messages
 
-  const keepCount = recentRounds * 2
-  if (messages.length <= keepCount) return messages
-
-  const recent = messages.slice(-keepCount)
-  const older = messages.slice(0, -keepCount)
+  const recent = recentWithin(messages, KEEP_TOKENS)
+  const older = messages.slice(0, messages.length - recent.length)
   if (older.length === 0) return messages
 
   const dialog = older

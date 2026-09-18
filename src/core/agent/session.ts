@@ -119,7 +119,18 @@ export class ChatSession {
     this.agent = opts.agent
     this.system = buildSystemPrompt(opts.persona ?? DEFAULT_PERSONA)
     this.hooks = { onSentence: opts.onSentence, onDelta: opts.onDelta, onEvent: opts.onEvent }
-    this.maxHistory = opts.maxHistory ?? 40
+    /*
+     * 400 条 ≈ 200 轮。
+     *
+     * 原来是 40 —— 那是个**按条数的硬上限**，等于「聊 20 轮就开始忘」。
+     * 现在的模型窗口（128k 起）装得下几千条，40 条这个数字是旧时代的约束。
+     *
+     * 真正该决定「什么时候开始忘」的是 agent 那边**按 token 估**的压缩判断
+     * （见 compaction.ts），不是这里的条数。
+     * 这个值现在只作为一个防爆的上界存在（防止 localStorage 和请求体无限膨胀），
+     * 不是「记忆的长度」。
+     */
+    this.maxHistory = opts.maxHistory ?? 400
     /*
      * ★ 恢复上次的对话历史。
      *   这一行就是"每次打开对话都是空的"的解药 —— 以前 toJSON()/load() 写了却没人调，
@@ -165,7 +176,7 @@ export class ChatSession {
     const agent = this.agent
     if (!agent?.enabled) return this.history
 
-    const remote = await loadHistoryFromAgent(agent.url, agent.sessionId ?? 'default')
+    const remote = await loadHistoryFromAgent(agent.url, agent.sessionId ?? 'default', 200)
 
     /*
      * null 和 [] 要分开处理：
