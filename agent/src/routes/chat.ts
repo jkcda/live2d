@@ -129,8 +129,24 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   }
 
   // 客户端断开（用户关窗口 / 点打断）时告诉 agent 别再算了
+  /*
+   * ★ 必须是 `res` 的 close，**不是 `req` 的**。
+   *
+   * Node 里 `req` 的 `'close'` 是「**请求体读完了**」时触发的，不是客户端断开 ——
+   * 拿它做「用户打断」判断的话，请求一开始就被判成「已打断」，
+   * 于是 runAgent 吐的第一个事件就被 break 掉，**一个字都发不出去**。
+   *
+   * 这个坑以前被另一件事盖住了：原来这里前面有个 `await compactHistory(...)`
+   * 要跑 47 秒，而这行注册在它之后 —— 那 47 秒里 close 早就触发过了，
+   * 监听器挂上去等于没挂。把那 47 秒去掉之后，它就立刻咬人了。
+   *
+   * `res` 的 `'close'` 才是「响应结束或者连接被提前掐断」——
+   * 再用 writableEnded 区分这两种情况。
+   */
   const abort = new AbortController()
-  req.on('close', () => abort.abort())
+  res.on('close', () => {
+    if (!res.writableEnded) abort.abort()
+  })
 
   const ctx: AgentContext = {
     commands: [],
@@ -166,7 +182,17 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
       send(event)
     }
   } catch (err) {
-    send({ type: 'error', error: err instanceof Error ? err.message : String(err) })
+    /*
+     * ★ 这里必须打日志。
+     *
+     * 原来只 `send` 给前端就完了 —— 结果是「她一句话都不回」的时候，
+     * 服务端日志里**一片空白**，只能靠猜。错误详情发给用户看也没用，
+     * 那是给排查的人看的。
+     */
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+    console.error('[chat] 这轮失败了：', detail)
+    if (err instanceof Error && err.stack) console.error(err.stack)
+    send({ type: 'error', error: detail })
   } finally {
     res.end()
     /*
@@ -176,7 +202,9 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
     console.log(
       `[chat] 入 ${input.length} 字｜历史 ${history.length} 条｜图 ${(screenChars / 1024).toFixed(0)}KB` +
         `｜压缩 ${compactMs}ms｜首事件 ${firstEventMs}ms｜首正文 ${firstContentMs}ms` +
-        `｜事件 ${eventCount} 个｜总计 ${Date.now() - t0}ms`,
+        `｜事件 ${eventCount} 个｜总计 ${Date.now() - t0}ms` +
+        // 「0 个事件」有两种可能：模型没吐，或者被 abort 掉了 —— 不打出来的话分不清
+        (abort.signal.aborted ? '｜⚠️ 被 abort 打断' : ''),
     )
   }
 
