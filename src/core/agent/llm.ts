@@ -103,63 +103,68 @@ export async function* streamChat(
  * 这是流式 TTS 的关键：不等整段回复生成完，凑够一句就送去合成，
  * 否则首包延迟会翻好几倍。
  */
+/**
+ * 一次合成最多多少字。超过就切一刀。
+ *
+ * ★ 现在**不再按句号切**了 —— 整段合成。
+ *
+ * 用户的原话：「把本地也换成整段全部合成声音再给吧，逐句给太拉了」。
+ * 每一段都是独立的 TTS 调用、各自有完整的语调收尾，所以「两句话」听起来像两段。
+ * 整段一次合成，模型看到完整上下文，语气是连贯的。
+ *
+ * ★ 这个上界不是为了语气，是为了**别让一次请求太长**
+ *
+ * 150 字 ≈ 27 秒音频。本地 RTF 在 0.74~1.62 之间（GPU 一忙就 > 1），
+ * 一次合成太久的话，播放会追上合成、中间卡顿。
+ * 150 字以内播放和合成基本同速，不会卡。
+ *
+ * 云端 RTF 0.14（实测），这个上界根本不会触发。
+ */
+const SPLIT_MAX_CHARS = 150
+
 export function createSentenceSplitter() {
   let pending = ''
 
   return {
-    /** 喂入增量，返回本次可以送去合成的完整句子（可能为空数组） */
+    /**
+     * 喂入增量。**只在超过上界时才返回内容**，否则一直攒着 ——
+     * 真正的整段提交发生在 `flush()`。
+     */
     push(chunk: string): string[] {
       pending += chunk
-      const out: string[] = []
-
-      // 中文句末标点 + 英文句末标点 + 换行
-      const boundary = /[。！？；\n!?;]+/g
-      let lastIndex = 0
-      let match: RegExpExecArray | null
-
-      while ((match = boundary.exec(pending)) !== null) {
-        const end = match.index + match[0].length
-        const sentence = pending.slice(lastIndex, end).trim()
-        if (sentence) out.push(sentence)
-        lastIndex = end
-      }
-
-      pending = pending.slice(lastIndex)
+      if (pending.length < SPLIT_MAX_CHARS) return []
 
       /*
-       * ★ 这里原来有一段「首句在逗号处提前切一小段」—— 已经删掉。
+       * 到上界了，切一刀。
        *
-       * 它当时是为了压低首音延迟（整句合成慢的时候，30 字要等 9 秒）。
-       * 但它让**每次回复的第一句都断成两截**，而每一截都是**独立的 TTS 调用**：
-       * 各自有完整的语调收尾和停顿，于是听起来就是「话还没说完一句就停了」。
-       * 用户的原话：「老是说话还没说完一句就停了」。
-       *
-       * 现在有端到端流式了 —— 长句靠它早出声，不用再靠切碎来抢时间。
-       * **切分只按句末标点，不碰逗号。**
+       * 优先切在**最后一个句末标点**处 —— 那是最自然的断点，
+       * 比在字中间硬切好听得多。找不到标点才硬切。
        */
+      const cut = lastBoundaryIn(pending)
+      const head = pending.slice(0, cut).trim()
+      pending = pending.slice(cut)
 
-      /*
-       * 兜底：单句过长（模型不吐标点）时强切，避免一直不发声。
-       *
-       * 60 字。曾经改成过 30 字（也是为延迟），但那会在句子中间切开发音 ——
-       * 一句话被切成两段各自合成，语气是断的。
-       *
-       * **宁可等，也不要碎。** 真遇到 60 字不吐标点的情况，流式会保证首块先出来，
-       * 不需要靠强切来抢那点时间。
-       */
-      if (pending.length >= 60) {
-        out.push(pending.trim())
-        pending = ''
-      }
-
-      return out
+      return head ? [head] : []
     },
 
-    /** 流结束时取出残留文本 */
+    /** 流结束时取出**全部**残留文本 —— 这就是「整段」的落点 */
     flush(): string {
       const rest = pending.trim()
       pending = ''
       return rest
     },
   }
+}
+
+/** 找出这段文本里最后一个句末标点的**位置之后**（用作切点）；没有就返回整段长度 */
+function lastBoundaryIn(text: string): number {
+  // 中文句末标点 + 英文句末标点 + 换行
+  const re = /[。！？；\n!?;]/g
+  let last = -1
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) last = m.index + m[0].length
+
+  // 找不到标点、或者断点太靠前（切完剩一大截没意义）就整段切走
+  if (last < text.length * 0.5) return text.length
+  return last
 }

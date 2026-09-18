@@ -70,7 +70,52 @@ function toolSummary(args: Record<string, unknown>): string {
  */
 function renderMarkdown(text: string): string {
   if (!text) return ''
-  return marked.parse(text, { breaks: true }) as string
+  return marked.parse(normalizeProse(text), { breaks: true }) as string
+}
+
+/**
+ * 把模型爱用的「每句一行」压回一整段。
+ *
+ * ★ 为什么要动它
+ *
+ * `breaks: true` 会把**单个换行变 <br>、空行变新 <p>**。
+ * 而模型经常把两句话各写一行 —— 于是界面上「两句话 = 两个段落」，
+ * 中间多出一截段间距。用户的原话：「对 2 句话要用两个 p 标签换行，没必要」。
+ *
+ * 中文正文本来就不靠换行断句（有标点），所以**普通行之间的换行直接去掉**。
+ *
+ * 但**结构性换行必须保留**：列表、标题、引用、代码块、表格 ——
+ * 去掉它们 markdown 就散了（列表会挤成一坨）。
+ * 判据就是行首那个标记。
+ */
+function normalizeProse(text: string): string {
+  /** 这一行是不是 markdown 的结构行（列表项 / 标题 / 引用 / 代码围栏 / 表格 / 缩进代码） */
+  const isStructural = (s: string): boolean =>
+    /^([-*+]|\d+[.)]|#{1,6}\s|>|```|\|| {4})/.test(s)
+
+  const out: string[] = []
+
+  for (const line of text.split('\n')) {
+    const t = line.trim()
+
+    // 空行、结构行、上一行是结构行 —— 都原样保留换行
+    if (!t || isStructural(t) || (out.length && isStructural(out[out.length - 1].trim()))) {
+      out.push(line)
+      continue
+    }
+
+    // 普通行：接到上一行后面
+    if (out.length) {
+      const prev = out[out.length - 1]
+      // 两边都是英文/数字才补空格，否则中文会被撑开
+      const needSpace = /[A-Za-z0-9]$/.test(prev) && /^[A-Za-z0-9]/.test(t)
+      out[out.length - 1] = prev + (needSpace ? ' ' : '') + t
+    } else {
+      out.push(line)
+    }
+  }
+
+  return out.join('\n')
 }
 
 const bubbles = ref<Bubble[]>([])
