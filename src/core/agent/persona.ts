@@ -26,6 +26,18 @@ export interface Persona {
    * 免得她以为自己看得见、然后凭空编出「我看到你在写代码」。
    */
   perception?: string
+
+  /**
+   * 语气标记的说明（[laughter] / [sigh] / [breath]）。
+   *
+   * 单独成项的理由和 perception 一样：这不是「该怎么说话」的风格规范，
+   * 而是**她具备什么能力** —— 合成引擎认得这些标记，写进去声音就真的会笑会叹气。
+   *
+   * ★ 留空则完全不提。换到不认这些标记的引擎（比如某个不支持的上游）时，
+   *   就必须留空 —— 否则她会把这些方括号**原样念出来**，
+   *   而那听起来像在念剧本。
+   */
+  emotion?: string
 }
 
 export const DEFAULT_PERSONA: Persona = {
@@ -59,6 +71,14 @@ export const DEFAULT_PERSONA: Persona = {
   background:
     '你和用户已经认识很久了。你记得他大概的作息和习惯，知道他最近在忙什么，' +
     '偶尔会提起之前聊过的事。你说话有停顿感，会用一个短句先接话，再补一句自己的看法。',
+
+  emotion:
+    '合成引擎认得下面三个标记，写在句子里声音就真的会笑、会叹气、会换气：\n' +
+    '  [laughter] 笑   [sigh] 叹气   [breath] 换气\n' +
+    '直接写在句子中间，前后不加空格、也不解释：\n' +
+    '  例：你终于来了[laughter]，我等半天了。\n' +
+    '**只在真的合适时才用 —— 一段话最多一两个。** 不要每句都加，也不要为了用而用：\n' +
+    '标记用得越省，出现时越像真的。',
 }
 
 /** 把结构化人设拍成一段 system prompt */
@@ -77,6 +97,11 @@ export function buildSystemPrompt(persona: Persona = DEFAULT_PERSONA): string {
   if (persona.perception) {
     lines.push('')
     lines.push(`【你能感知到的】${persona.perception}`)
+  }
+
+  if (persona.emotion) {
+    lines.push('')
+    lines.push(`【语气标记】${persona.emotion}`)
   }
 
   lines.push('')

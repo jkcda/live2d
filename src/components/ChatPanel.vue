@@ -11,6 +11,7 @@ import {
 import type { VoiceInputStatus } from '@/core/audio/stream'
 import { isLLMReady, loadLLMConfig } from '@/core/settings'
 import { DEFAULT_PERSONA } from '@/core/agent/persona'
+import { toDisplayText } from '@/core/agent/emotion'
 
 const emit = defineEmits<{ close: []; settings: [] }>()
 
@@ -70,7 +71,9 @@ function toolSummary(args: Record<string, unknown>): string {
  */
 function renderMarkdown(text: string): string {
   if (!text) return ''
-  return marked.parse(normalizeProse(text), { breaks: true }) as string
+  // 先过语气标记（[laughter] → （笑）、呼吸类删掉、末尾不完整的扣住），再交给 markdown。
+  // 必须在 markdown 之前 —— 否则方括号会被当成链接语法。
+  return marked.parse(normalizeProse(toDisplayText(text)), { breaks: true }) as string
 }
 
 /**
