@@ -8,8 +8,8 @@
   模板是 `tools/tts-api.env.example`（入库，里面没有真 key）。
 
   用法：
-    .\tools\start-api.cmd
-    .\tools\start-api.cmd -Electron     # 想开桌宠窗口就加这个
+    .\tools\start-api.cmd              # 桌面版（桌宠窗口），线上 TTS
+    .\tools\start-api.cmd -Web         # 只起 dev server，不开窗口（调试 UI 用）
 #>
 
 $ErrorActionPreference = "Stop"

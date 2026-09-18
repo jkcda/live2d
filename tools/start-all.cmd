@@ -10,8 +10,8 @@ rem
 rem All real logic and documentation lives in start-all.ps1.
 rem
 rem Usage:
-rem   start-all.cmd                start everything
-rem   start-all.cmd -Electron      start with the desktop-pet window
+rem   start-all.cmd                start everything (desktop-pet window by default)
+rem   start-all.cmd -Web           front-end as a plain dev server, no window
 rem   start-all.cmd -Skip web      skip a service
 rem ---------------------------------------------------------------------------
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-all.ps1" %*

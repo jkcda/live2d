@@ -7,16 +7,32 @@
   漏前端是"啥也没有"。所以做成一条命令 + 启动完**自动探活并打印结果**。
 
   用法：
-      .\tools\start-all.ps1                 # 全部拉起（已起的会自动跳过）
-      .\tools\start-all.ps1 -Electron       # 前端用 Electron 窗口（桌宠形态）而不是 dev server
+      .\tools\start-all.ps1                 # 全部拉起，前端是**桌面版**（Electron 桌宠窗口）
+      .\tools\start-all.ps1 -Web            # 前端只起 dev server，不开窗口（调试 UI 用）
       .\tools\start-all.ps1 -Skip agent     # 只起前三个
       .\tools\start-all.ps1 -CosyPort 8790  # 改端口
+
+  注意：桌面模式下 Vite dev server **照样在 5176 上跑**（`pnpm dev` 会同时起两个），
+  所以想用浏览器看，直接开 http://localhost:5176/ 就行 —— 但浏览器里没有
+  看屏幕、托盘、穿透这些能力（那些要 Electron 的桥，见 electron/preload.ts）。
 
   停止：.\tools\stop-all.ps1
   日志：logs\<名字>.log（这脚本把输出都重定向到那儿，控制台只留结论）
 #>
 param(
   [string[]]$Skip = @(),
+  <#
+    默认起**桌面版**（Electron 桌宠窗口）。
+
+    为什么改默认：她是个桌宠 —— 看屏幕、知道你在用什么程序、托盘常驻、
+    窗口穿透，**这些能力全在 Electron 那一侧**（见 electron/preload.ts）。
+    浏览器版只是个调试壳，看不到屏幕也不知道你在干嘛。
+
+    而且 `pnpm dev` 会**同时**起 Vite dev server 和 Electron 窗口，
+    所以桌面模式下浏览器照样能连 http://localhost:5176/ —— 两边都不亏。
+  #>
+  [switch]$Web,
+  # 兼容旧写法：以前默认浏览器版、要加 -Electron 才有窗口。现在反过来了，这个参数忽略。
   [switch]$Electron,
   [int]$CosyPort = 8788,
   [int]$ServicePort = 8765,
@@ -182,9 +198,14 @@ Start-Svc -Name "agent" -Port $AgentPort -WorkDir (Join-Path $root "agent") `
   -File $pnpmPath -ArgList @("start") `
   -Env @{ AGENT_PORT = "$AgentPort" }
 
-# ④ 前端：dev server（浏览器看）或 Electron（桌宠窗口）
-if ($Electron) {
-  if (-not $pnpmPath) {
+# ④ 前端：默认 Electron 桌宠窗口；加 -Web 才是纯浏览器模式
+if (-not $Web) {
+  if ($Skip -contains "web" -or $Skip -contains "electron") {
+    # ★ 这个分支原来**没有 Skip 检查** —— 因为它直接 Start-Process，
+    #   没走 Start-Svc（检查在 Start-Svc 里）。结果 `-Skip web` 跳过了 dev server、
+    #   却照样把 Electron 窗口拉起来，跟"跳过"两个字完全相反。
+    $rows += [pscustomobject]@{ 服务="Electron 窗口"; 端口="—"; 结果="跳过"; 说明="" }
+  } elseif (-not $pnpmPath) {
     $rows += [pscustomobject]@{ 服务="Electron 窗口"; 端口="—"; 结果="失败"; 说明="找不到 pnpm.cmd" }
   } elseif (Test-Port $WebPort) {
     <#
@@ -274,7 +295,7 @@ if ($bad.Count) {
   # 日志文件名用的是内部名（cosy/service/agent/web），不是上面那列中文显示名
   foreach ($b in $bad) { Write-Host "  · $($b.服务)：$(Join-Path $logs "$($b.键).err.log")" -ForegroundColor DarkYellow }
 } else {
-  if ($Electron) {
+  if (-not $Web) {
     Write-Host "全部就绪 - 她的窗口是桌宠形态（Electron），出现在桌面右下角" -ForegroundColor Green
     Write-Host "  托盘图标右键：隐藏 / 和她说话 / 设置 / 暂停观察 / 退出"
     Write-Host "  没看到她？确认发行版构建是最新的：pnpm build"
