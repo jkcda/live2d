@@ -71,7 +71,21 @@ export class VoiceOutput {
         if (gen !== this.generation) return
 
         const result = await opened
-        if (gen !== this.generation) return
+
+        /*
+         * ★ 被打断时**必须把响应体取消掉**。
+         *
+         * 直接 return 的话，这个响应体永远不会被读、也不会被取消 ——
+         * 服务端那个生成器就一直卡在「往 socket 写」上（它还拿着模型锁），
+         * 于是后面**每一个**请求都在等锁。
+         *
+         * 实测就是这样：首块 11s → 25s → 37s 一路递增，而生成本身只要 2 秒。
+         * 这不是「资源慢慢泄漏」那种问题，是**一次打断就毒死整条链路**。
+         */
+        if (gen !== this.generation) {
+          if (result.kind === 'stream') void result.resp.body?.cancel()
+          return
+        }
 
         if (result.kind === 'stream') {
           await this.playStream(result.resp, gen)

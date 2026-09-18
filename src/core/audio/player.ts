@@ -101,11 +101,22 @@ export class AudioPlayer {
   // 这边是「一块一块排到时间轴上」。**时间轴本身就是缓冲区** ——
   // 所以不需要额外攒，也不需要额外的队列。
 
-  /** 开始一段流式播放（会先掐断正在播的） */
+  /**
+   * 开始一段流式播放。
+   *
+   * ★ 这里**故意不 stop()**
+   *
+   * 容易被写成「开始新一段就掐断旧的」（非流式的 startSource 就是那样），
+   * 但流式是**按句调用**的 —— 每一句都会 beginStream 一次。
+   * 在这儿 stop 的话，第一句还在播、第二句的头一到就被掐掉了。
+   *
+   * 打断由 `interrupt()` → `player.stop()` 负责，不归这里。
+   *
+   * 时间轴游标也**不重置**：上一段结束很久了的话它已经在过去，
+   * pushStreamChunk 里的 `Math.max(..., now + 0.02)` 会兜住。
+   */
   beginStream(sampleRate: number): void {
-    this.stop()
     this.streamRate = sampleRate
-    this.nextStartTime = 0
     this.streamDone = false
     this.streamEnd = null
   }

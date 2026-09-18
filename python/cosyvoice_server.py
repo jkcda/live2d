@@ -30,6 +30,7 @@ import argparse
 import json
 import logging
 import os
+import queue
 import struct
 import sys
 import threading
@@ -539,28 +540,61 @@ def tts_stream(req: TTSRequest) -> StreamingResponse:
     def gen():
         yield stream_frame(header)
 
-        # 合成不是线程安全的（同一份 KV cache），串行化。
-        # 锁要**跨整个生成过程**持有 —— 和 /tts 一样，区别只是这次中途会 yield。
-        # 客户端断开时生成器被关闭，with 退出，锁正常释放。
         t0 = time.time()
         first_at = 0.0
         chunks = 0
         samples = 0
 
-        with _lock:
-            for out in model.inference_zero_shot(text, "", "", voice, stream=True, speed=req.speed):
-                wav = out["tts_speech"].squeeze(0).cpu().numpy()
-                if not wav.size:
-                    continue
-                if not first_at:
-                    first_at = time.time() - t0
-                chunks += 1
-                samples += wav.shape[0]
-                yield stream_frame(to_pcm16(wav))
+        """
+        ★ 为什么要把「生成」和「写出」拆成两个线程
 
-        # 计时和 /tts 对齐（首块/总计/音频/RTF）——
-        # 这两个数放在一起才能判断「流式到底省了多少」。
-        # 它也是「流式真的被用上了」的唯一现场证据：日志里出现「流式合成」就说明前端走了这条路。
+        模型不是线程安全的，所以生成必须串行（_lock）。但**锁只能保护生成，
+        不能跨客户端的读取** —— 原来直接在这个生成器里 with _lock + yield，
+        意味着：客户端不读（它按队列顺序，还没轮到这句）→ socket 写满 →
+        生成器阻塞在 yield → **锁一直不放** → 后面所有请求全在等锁。
+
+        实测就是这样：首块 11s → 25s → 37s 一路递增，而生成本身只要 2 秒。
+
+        拆开之后：生产线程拿着锁把音频生成完（2~3 秒）就放锁，
+        音频先堆在内存队列里；这个生成器按客户端的节奏慢慢吐。
+        一句的 PCM 也就几百 KB，堆着完全没问题。
+        """
+        q: queue.Queue = queue.Queue()
+
+        def produce() -> None:
+            try:
+                with _lock:
+                    for out in model.inference_zero_shot(
+                        text, "", "", voice, stream=True, speed=req.speed
+                    ):
+                        wav = out["tts_speech"].squeeze(0).cpu().numpy()
+                        if wav.size:
+                            q.put(("chunk", wav))
+            except Exception as err:  # noqa: BLE001
+                q.put(("error", err))
+            finally:
+                q.put(("done", None))
+
+        worker = threading.Thread(target=produce, daemon=True)
+        worker.start()
+
+        while True:
+            kind, payload = q.get()
+
+            if kind == "done":
+                break
+            if kind == "error":
+                # 已经发了头，没法再改状态码 —— 只能记日志，然后正常收尾。
+                # 客户端会因为帧数不足而察觉（拿不到音频）。
+                log.exception("流式合成失败：%r", text[:40])
+                break
+
+            if not first_at:
+                first_at = time.time() - t0
+            chunks += 1
+            samples += payload.shape[0]
+            yield stream_frame(to_pcm16(payload))
+
         audio = samples / sample_rate if sample_rate else 0.0
         total = time.time() - t0
         log.info(
