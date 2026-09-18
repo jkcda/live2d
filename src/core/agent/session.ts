@@ -176,7 +176,20 @@ export class ChatSession {
     if (remote === null) return this.history
 
     this.history = remote
-    if (remote.length) saveHistory(this.history)
+
+    /*
+     * ★ 必须 trim。
+     *
+     * 服务端转录是**全量**的（它只追加，不删），随手就是几十上百条。
+     * 不裁的话有两个后果，第二个更致命：
+     *   ① 每次请求都把整份历史发出去
+     *   ② **agent 那边的 compactHistory 会被每轮触发** —— 它的阈值是 60 条，
+     *      而它内部要调一次 LLM 做摘要。实测一轮 60 秒里有 **47.7 秒**是它。
+     *
+     * 模型该看多少（maxHistory）和转录里存了多少，是两件事。
+     */
+    this.trim()
+    if (this.history.length) saveHistory(this.history)
     return this.history
   }
 

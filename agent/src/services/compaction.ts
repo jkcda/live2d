@@ -103,6 +103,39 @@ ${SECTIONS}
  * 压缩失败时**退化为截断**（保留最近的部分）而不是抛错：
  * 摘要是优化，聊不下去才是事故。
  */
+/**
+ * 只用**已有的**摘要裁剪历史 —— 不调模型，快到可以放在请求路径上。
+ *
+ * ★ 为什么要把「应用」和「生成」拆开
+ *
+ * `compactHistory` 内部要调一次 LLM 生成摘要，**实测能到 47.7 秒**。
+ * 它原来是在请求路径上 `await` 的 —— 用户每问一句，都要先等一次摘要生成。
+ * 实测一轮 60 秒里 **48 秒**花在这儿，而模型自己只花了 11 秒。
+ *
+ * 摘要是**优化**，不是回复的前提：这一轮先用上次的摘要（或者干脆不裁），
+ * 摘要本身放到回复发完之后慢慢算。
+ *
+ * 没有摘要时**返回原样**，不为了生成它卡住回复 —— 多花点 token 比让用户等 47 秒强。
+ */
+export function applyCompaction(
+  messages: HistoryMessage[],
+  sessionId: string,
+  recentRounds = COMPACT_AFTER_ROUNDS,
+): HistoryMessage[] {
+  if (messages.length === 0) return messages
+
+  const keepCount = recentRounds * 2
+  if (messages.length <= keepCount) return messages
+
+  const summary = loadCompaction(sessionId)
+  if (!summary) return messages
+
+  return [
+    { role: 'user', content: `[之前聊过的（摘要）]\n${summary}` },
+    ...messages.slice(-keepCount),
+  ]
+}
+
 export async function compactHistory(
   messages: HistoryMessage[],
   sessionId: string,

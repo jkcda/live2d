@@ -28,7 +28,7 @@ import {
   type ChatMessage,
   type ScreenAttachment,
 } from '../services/agent.js'
-import { compactHistory, loadCompaction } from '../services/compaction.js'
+import { applyCompaction, compactHistory, loadCompaction } from '../services/compaction.js'
 import { clearMemory, afterTurn, distillNow, forgetEntry, memoryStatus } from '../services/memory.js'
 import { appendTurn, clearTranscript, readRecentTurns } from '../services/transcript.js'
 import { getMcpStatus, mcpToolCounts } from '../services/mcp.js'
@@ -99,16 +99,20 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   const screenChars = typeof body.screen?.dataUrl === 'string' ? body.screen.dataUrl.length : 0
 
   /*
-   * 长对话先压缩再喂给模型。
-   * 放在这里（每次请求的开头）而不是"聊完再压"：聊完那一刻用户已经在等下一句了，
-   * 而这里本来就要等模型，压缩的那点延迟是**重叠**掉的。
+   * ★ 请求路径上**只应用已有摘要，绝不现算**。
+   *
+   * 原来这里 `await compactHistory(...)` —— 它内部要调一次 LLM 生成摘要，
+   * 实测 47.7 秒。用户每问一句都要先等这一次，一轮 60 秒里 48 秒花在这儿，
+   * 而模型自己只花 11 秒。
+   *
+   * 摘要是优化，不是回复的前提。生成挪到回复发完之后（见下面的 finally）。
    */
   let messages = history
   let compactMs = 0
   try {
-    messages = await compactHistory(history, sessionId, llm)
+    messages = applyCompaction(history, sessionId)
   } catch (err) {
-    console.warn('[chat] 压缩失败，用原历史：', err instanceof Error ? err.message : err)
+    console.warn('[chat] 应用摘要失败，用原历史：', err instanceof Error ? err.message : err)
   } finally {
     compactMs = Date.now() - t0
   }
@@ -187,6 +191,20 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   if (assistantText.trim() && !abort.signal.aborted) {
     appendTurn(sessionId, input, assistantText)
     afterTurn(sessionId, llm)
+
+    /*
+     * 摘要在这里生成 —— **用户已经拿到回复了**（res.end 在上面）。
+     *
+     * 它可能要几十秒，但那段时间用户是在读回复、或者已经在打下一句了，
+     * 不占他的等待。生成好之后下一轮 applyCompaction 就会用上。
+     */
+    void compactHistory(
+      [...history, { role: 'user', content: input }, { role: 'assistant', content: assistantText }],
+      sessionId,
+      llm,
+    ).catch((err) => {
+      console.warn('[chat] 后台摘要失败（不影响聊天）：', err instanceof Error ? err.message : err)
+    })
   }
 })
 
