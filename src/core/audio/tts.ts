@@ -60,16 +60,31 @@ export class VoiceOutput {
     const controller = this.ensureController()
     this.pending++
 
-    // 关键：先发起合成（不 await），再挂到播放链尾 —— 合成与播放解耦
-    const audio = this.synthesize(text, controller.signal)
+    // 关键：先发起（不 await），再挂到播放链尾 —— 合成与播放解耦。
+    // 流式下这一点更重要：请求发出去之后，服务端会先把首块产出到 socket 缓冲里，
+    // 等队列轮到这一句时，首块已经在本地了。
+    const opened = this.openStream(text, controller.signal)
 
     this.queue = this.queue
       .then(async () => {
         // 这一句在排队期间被打断了，直接丢弃
         if (gen !== this.generation) return
-        const buffer = await audio
-        if (!buffer || gen !== this.generation) return
-        await this.player.playBufferAndWait(buffer)
+
+        const result = await opened
+        if (gen !== this.generation) return
+
+        if (result.kind === 'stream') {
+          await this.playStream(result.resp, gen)
+          return
+        }
+
+        if (result.kind === 'fallback') {
+          // 服务端没实现 /tts/stream（老版本，或者换了引擎）→ 走整段那条路。
+          // 明确降级，而不是让流式解析失败 —— 后者看起来像「没声音」。
+          const buffer = await this.synthesize(text, controller.signal)
+          if (!buffer || gen !== this.generation) return
+          await this.player.playBufferAndWait(buffer)
+        }
       })
       .catch((err) => {
         console.warn('[tts] 播放失败', err)
@@ -143,6 +158,117 @@ export class VoiceOutput {
     await this.player.playBufferAndWait(buffer)
   }
 
+  /**
+   * 打开一条流式合成。
+   *
+   * **立刻返回**（`fetch` 在响应头到达时就 resolve，不等音频）——
+   * 这一点很重要：服务端会马上把首块产出来，等队列轮到这句时首块已经在本地了。
+   */
+  private async openStream(text: string, signal: AbortSignal): Promise<OpenedStream> {
+    const cfg = this.getConfig()
+    if (!cfg.baseURL) return { kind: 'error' }
+
+    try {
+      const resp = await fetch(`${trimSlash(cfg.baseURL)}/tts/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: cfg.voice, speed: cfg.speed }),
+        signal,
+      })
+
+      if (resp.ok) return { kind: 'stream', resp }
+
+      // 404/405/501 = 服务端没有这个端点（老版本，或换了引擎）→ 降级
+      if (resp.status === 404 || resp.status === 405 || resp.status === 501) {
+        return { kind: 'fallback' }
+      }
+
+      throw new Error(`HTTP ${resp.status} ${resp.statusText}`)
+    } catch (err) {
+      // 打断导致的取消是正常路径，不报错
+      if (err instanceof DOMException && err.name === 'AbortError') return { kind: 'error' }
+      if (err instanceof Error && err.name === 'TimeoutError') return { kind: 'error' }
+      console.warn('[tts] 流式合成失败（服务未启动？）', err)
+      return { kind: 'error' }
+    }
+  }
+
+  /**
+   * 消费一条流：边收边排给播放器。
+   *
+   * 帧协议（见 python/cosyvoice_server.py 的 /tts/stream）：
+   *   [4 字节小端长度][内容]，长度 0 表示结束。
+   *   第一帧是 JSON 头（采样率等），后面每帧是 s16le 单声道 PCM。
+   *
+   * 为什么不用 decodeAudioData：**它吃不了半截流**。WAV/MP3 这些格式
+   * 得看到完整文件（或至少完整的头）才能解，而我们是拿到一块就要播一块。
+   * 所以自己把 s16le 转成 Float32 —— 这也是服务端不直接发 WAV 的原因。
+   */
+  private async playStream(resp: Response, gen: number): Promise<void> {
+    const reader = resp.body?.getReader()
+    if (!reader) return
+
+    let head: StreamHead | null = null
+    // 显式标成默认泛型：reader.read() 给的是 Uint8Array<ArrayBufferLike>，
+    // 不标的话会被推断成 Uint8Array<ArrayBuffer>，赋值时类型对不上
+    let carry: Uint8Array = new Uint8Array(0)
+    let started = false
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        // 被打断了：把连接也断掉，别让服务端继续合成
+        if (gen !== this.generation) {
+          void reader.cancel()
+          return
+        }
+
+        carry = concatBytes(carry, value)
+
+        // 尽量多解析几帧出来 —— 一次 read 可能带回好几帧，
+        // 也可能只带回半帧（帧头都在中间断开）
+        for (;;) {
+          if (carry.length < 4) break
+          const len = new DataView(carry.buffer, carry.byteOffset, 4).getUint32(0, true)
+
+          if (len === 0) {
+            // 结束标记。等已排期的块播完再返回 ——
+            // 「这一句说完了」和「这一句开始播了」是两件事。
+            carry = new Uint8Array(0)
+            if (started) await this.player.endStream()
+            return
+          }
+
+          if (carry.length < 4 + len) break // 帧还没收全
+
+          const payload = carry.subarray(4, 4 + len)
+          carry = carry.subarray(4 + len)
+
+          if (!head) {
+            head = JSON.parse(new TextDecoder().decode(payload)) as StreamHead
+            this.player.beginStream(head.sampleRate)
+            started = true
+          } else {
+            this.player.pushStreamChunk(pcm16ToFloat32(payload))
+          }
+        }
+      }
+
+      /*
+       * 走到这里说明连接关了但**没收到结束标记** —— 服务端挂了，或者网络断了。
+       *
+       * 这时已经排期的那些照常播完（不 stop()），但必须 endStream()：
+       * 不调的话播放器的等待者永远不 resolve，队列卡死，
+       * 后面所有句子都播不出来，而且**不报错**。
+       */
+      if (started && gen === this.generation) await this.player.endStream()
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
   private ensureController(): AbortController {
     if (!this.controller) this.controller = new AbortController()
     return this.controller
@@ -192,4 +318,53 @@ function detailOf(raw: string): string {
     // 不是 JSON，原样带上（截断，别把一屏堆栈塞进界面）
   }
   return ` · ${raw.slice(0, 120)}`
+}
+
+/** /tts/stream 第一帧里的格式信息 */
+interface StreamHead {
+  sampleRate: number
+  channels: number
+  format: string
+  gain: number
+  voice: string
+  engine: string
+}
+
+/**
+ * openStream 的三种结果。
+ *
+ * 用类型区分「有流」「该降级」「出错了」，而不是用 null + 标志位 ——
+ * 「服务端没有这个端点」和「服务没起来」要走的处理完全不同，
+ * 混在一起就会变成「明明该降级却报错」或者反过来。
+ */
+type OpenedStream =
+  | { kind: 'stream'; resp: Response }
+  | { kind: 'fallback' }
+  | { kind: 'error' }
+
+/** 拼两块字节。读流时一次 read 可能只带回半帧，得自己接起来 */
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (!a.length) return b
+  const out = new Uint8Array(a.length + b.length)
+  out.set(a, 0)
+  out.set(b, a.length)
+  return out
+}
+
+/**
+ * s16le → Float32（-1~1）。
+ *
+ * 用 DataView 而不是 `new Int16Array(bytes.buffer, offset, n)`：
+ * 后者要求 offset 是 2 的倍数，而 `subarray` 出来的视图**不保证对齐** ——
+ * 不对齐会直接抛异常，而且是「大部分时候没事、偶尔炸」的那种。
+ * 这里量很小（一块几十万采样，一两毫秒），用安全的写法。
+ */
+function pcm16ToFloat32(bytes: Uint8Array): Float32Array {
+  const n = bytes.length >> 1
+  const out = new Float32Array(n)
+  const view = new DataView(bytes.buffer, bytes.byteOffset, n * 2)
+  for (let i = 0; i < n; i++) {
+    out[i] = view.getInt16(i * 2, true) / 32768
+  }
+  return out
 }

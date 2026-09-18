@@ -13,6 +13,22 @@ export class AudioPlayer {
   /** playBufferAndWait 的唤醒回调，stop() 时要主动调用 */
   private pendingEnd: (() => void) | null = null
 
+  /**
+   * 流式播放：已排期但可能还没开始播的节点。
+   *
+   * 和上面那个单一 `source` 的区别是**同时存在多个** ——
+   * 流式是「一块一块排到时间轴上」，同一时刻可能有好几块已经排好等着播。
+   */
+  private scheduled: AudioBufferSourceNode[] = []
+  /** 时间轴游标：下一块从什么时候开始（AudioContext 的秒数） */
+  private nextStartTime = 0
+  /** 流式播放的采样率，beginStream 时确定 */
+  private streamRate = 24000
+  /** 流是否已经没有新块了 */
+  private streamDone = false
+  /** endStream 的唤醒回调 */
+  private streamEnd: (() => void) | null = null
+
   private ensureContext(): AudioContext {
     if (!this.ctx) {
       const ctx = new AudioContext()
@@ -79,6 +95,90 @@ export class AudioPlayer {
     })
   }
 
+  // ── 流式播放 ──
+  //
+  // 和非流式的区别：那边是「一整段 buffer 一次 start()」，
+  // 这边是「一块一块排到时间轴上」。**时间轴本身就是缓冲区** ——
+  // 所以不需要额外攒，也不需要额外的队列。
+
+  /** 开始一段流式播放（会先掐断正在播的） */
+  beginStream(sampleRate: number): void {
+    this.stop()
+    this.streamRate = sampleRate
+    this.nextStartTime = 0
+    this.streamDone = false
+    this.streamEnd = null
+  }
+
+  /**
+   * 排一块进去。单声道 Float32，范围 -1~1。
+   *
+   * ★ 关键是**排期**而不是「立刻播」
+   *
+   * 每块都接在上一块**结束的时刻**。用「现在」的话：
+   *   · 合成比播放快 → 后一块盖住前一块的尾巴（丢字）
+   *   · 合成比播放慢 → 中间留一段静音（断续）
+   * 两者都是「听起来不对但很难说哪里不对」的那类问题。
+   *
+   * 落后于当前时间（合成慢了、播放追上来了）就退回「现在 + 20ms」——
+   * `start()` 传一个过去的时间点会让节点立即播放，容易咔一声。
+   */
+  pushStreamChunk(samples: Float32Array): void {
+    if (samples.length === 0) return
+
+    const ctx = this.ensureContext()
+    const buffer = ctx.createBuffer(1, samples.length, this.streamRate)
+    // 用 getChannelData().set() 而不是 copyToChannel()：
+    // 后者在 TS 5.7 的类型里要求 Float32Array<ArrayBuffer>，
+    // 而调用方传的是默认泛型 Float32Array<ArrayBufferLike>，对不上。
+    // 两者行为等价，这个写法还少一次类型断言。
+    buffer.getChannelData(0).set(samples)
+
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    src.connect(this.analyser!)
+
+    const now = ctx.currentTime
+    const startAt = Math.max(this.nextStartTime, now + 0.02)
+    src.start(startAt)
+    this.nextStartTime = startAt + buffer.duration
+
+    src.onended = () => {
+      try {
+        src.disconnect()
+      } catch {
+        // 已经断开了
+      }
+      const i = this.scheduled.indexOf(src)
+      if (i >= 0) this.scheduled.splice(i, 1)
+
+      // 最后一块也播完了
+      if (!this.scheduled.length) {
+        this.playing = false
+        if (this.streamDone) {
+          const done = this.streamEnd
+          this.streamEnd = null
+          done?.()
+        }
+      }
+    }
+
+    this.scheduled.push(src)
+    this.playing = true
+  }
+
+  /** 流结束：等所有已排期的块播完 */
+  async endStream(): Promise<void> {
+    this.streamDone = true
+    if (!this.scheduled.length) {
+      this.playing = false
+      return
+    }
+    return new Promise<void>((resolve) => {
+      this.streamEnd = resolve
+    })
+  }
+
   private startSource(buffer: AudioBuffer, onEnded?: () => void): void {
     // 抢断正在播的那一段：它的等待者代表「被打断的播放」，应该被唤醒。
     // 但绝不能碰即将登记的新等待者 —— 所以先把旧的取走、清空。
@@ -128,10 +228,38 @@ export class AudioPlayer {
     const done = this.pendingEnd
     this.pendingEnd = null
     done?.()
+
+    // 流式的等待者同样要唤醒 —— 否则 endStream() 永远不 resolve，
+    // 队列卡死，后面所有句子都播不出来（而且不报错）
+    const streamDone = this.streamEnd
+    this.streamEnd = null
+    this.streamDone = false
+    streamDone?.()
   }
 
   /** 只停声音，不碰等待者 */
   private stopSource(): void {
+    /*
+     * 流式：**所有已排期的都要停**，不只是正在播的那个。
+     *
+     * 这是个容易漏的地方 —— 打断时只停当前节点的话，后面排好的几块
+     * 会接着播出来。表现是「她明明被打断了，过一秒又自己说起来」。
+     */
+    for (const node of this.scheduled) {
+      node.onended = null
+      try {
+        node.stop()
+      } catch {
+        // 已经自然结束
+      }
+      try {
+        node.disconnect()
+      } catch {
+        // 已断开
+      }
+    }
+    this.scheduled = []
+
     const src = this.source
     if (src) {
       src.onended = null

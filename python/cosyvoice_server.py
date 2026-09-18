@@ -542,11 +542,36 @@ def tts_stream(req: TTSRequest) -> StreamingResponse:
         # 合成不是线程安全的（同一份 KV cache），串行化。
         # 锁要**跨整个生成过程**持有 —— 和 /tts 一样，区别只是这次中途会 yield。
         # 客户端断开时生成器被关闭，with 退出，锁正常释放。
+        t0 = time.time()
+        first_at = 0.0
+        chunks = 0
+        samples = 0
+
         with _lock:
             for out in model.inference_zero_shot(text, "", "", voice, stream=True, speed=req.speed):
                 wav = out["tts_speech"].squeeze(0).cpu().numpy()
-                if wav.size:
-                    yield stream_frame(to_pcm16(wav))
+                if not wav.size:
+                    continue
+                if not first_at:
+                    first_at = time.time() - t0
+                chunks += 1
+                samples += wav.shape[0]
+                yield stream_frame(to_pcm16(wav))
+
+        # 计时和 /tts 对齐（首块/总计/音频/RTF）——
+        # 这两个数放在一起才能判断「流式到底省了多少」。
+        # 它也是「流式真的被用上了」的唯一现场证据：日志里出现「流式合成」就说明前端走了这条路。
+        audio = samples / sample_rate if sample_rate else 0.0
+        total = time.time() - t0
+        log.info(
+            "流式合成 %d 字｜首块 %.2fs｜总计 %.2fs｜音频 %.2fs｜RTF %.2f｜%d 块",
+            len(text),
+            first_at,
+            total,
+            audio,
+            total / audio if audio else 0.0,
+            chunks,
+        )
 
         # 长度 0 = 结束。这也是客户端唯一能区分
         # 「正常说完」和「连接断了」的信号。
