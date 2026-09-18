@@ -72,3 +72,7 @@ Thumbs.db
 # Playwright MCP °ÑÍøÒ³¿ìÕÕĞ´µ½Õâ£¨ÔËĞĞÊ±²úÎï£¬²»Èë¿â£©
 .playwright-mcp/
 agent/.playwright-mcp/
+
+# â”€â”€ çº¿ä¸Š TTS çš„é…ç½®ï¼ˆå« API keyï¼Œç»ä¸å…¥åº“ï¼‰â”€â”€
+# æ¨¡æ¿è§ tools/tts-api.env.example
+tools/tts-api.env
