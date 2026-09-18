@@ -45,8 +45,16 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
  *
  * **RTF > 1 就没有「既早开口又不卡」的解。** 对陪伴来说，
  * 一句话说到一半断掉比晚两秒开口伤得多 —— 所以慢引擎选后者。
+ *
+ * ★ 初始值取「**永不流式**」而不是 20，这是个刻意的保守选择：
+ *
+ * 探到引擎之前我们不知道它快不快。两个默认值各有各的错法：
+ *   · 默认流式 → 引擎慢的话，第一次说话就是**断的**（用户直接听到 bug）
+ *   · 默认不流式 → 引擎快的话，第一次说话**晚一点开口**（用户感觉不到）
+ *
+ * **不确定的时候选「错了也不明显」的那一侧。** 探针回来后就会改成正确的值。
  */
-let streamMinChars = 20
+let streamMinChars = Number.MAX_SAFE_INTEGER
 
 export class VoiceOutput {
   /** 播放队列尾；每句话挂到它后面，保证串行 */
@@ -84,31 +92,35 @@ export class VoiceOutput {
     this.pending++
 
     /*
-     * 每句都过这里，所以探引擎挂在这儿 —— 见 ensureEngineProbe 的注释。
+     * ★ 顺序不能反：**先探引擎，再决定走哪条路**。
      *
-     * 为什么不挂在 interrupt()：那个不是每轮都调的
-     * （session 里是 `if (this.controller) this.interrupt()`，第一句不调），
-     * 挂在它上面会让「应用启动后第一次说话」用错切分粒度。
+     * 这里踩过（而且症状极具误导性）：原来是
      *
-     * 内部有 10 秒缓存，所以不是每句都发请求。
+     *     void this.ensureEngineProbe()          // 发起，不 await
+     *     const short = text.length < streamMinChars   // 立刻读 —— 探针还没回来
+     *
+     * 读到的是**上一次的值**。于是「改了配置但没生效」，
+     * 而日志里明明能看到新值已经算出来了 —— 排查时最容易被带偏的那种。
+     *
+     * 现在把「决定走哪条路」挂到探针后面。代价是**第一次说话**要等探针
+     * （最多 2 秒，之后就命中缓存），换来的是配置一定生效。
+     *
+     * 注意「合成与播放解耦」这条没破：`started` 一 resolve 就立刻发起合成，
+     * 而播放仍然排在队列里等 —— 只是发起时刻被推到了探针之后。
      */
-    void this.ensureEngineProbe()
-
-    /*
-     * 短句整句、长句流式（阈值见 streamMinChars，**跟着引擎快慢走**）。
-     *
-     * ★ 两条路都**立刻发起**，不等队列轮到 —— 「合成并行、播放串行」
-     *   是这个类的立身之本。等到队列才发起的话，前一句在播的时候
-     *   后一句的合成根本没开始，每句之间都要重新等一遍首块，比不流水还慢。
-     */
-    const short = text.length < streamMinChars
-    const whole = short ? this.synthesize(text, controller.signal) : null
-    const opened = short ? null : this.openStream(text, controller.signal)
+    const started = this.ensureEngineProbe().then(() => {
+      const short = text.length < streamMinChars
+      return short
+        ? { whole: this.synthesize(text, controller.signal), opened: null }
+        : { whole: null, opened: this.openStream(text, controller.signal) }
+    })
 
     this.queue = this.queue
       .then(async () => {
         // 这一句在排队期间被打断了，直接丢弃
         if (gen !== this.generation) return
+
+        const { whole, opened } = await started
 
         // 短句：整段合成 → 一次播完（拿得到整段峰值归一化）
         if (whole) {
