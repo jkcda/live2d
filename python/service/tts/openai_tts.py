@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import struct
 import time
 import urllib.error
 import urllib.request
@@ -154,8 +155,8 @@ class OpenAITtsEngine(TTSEngine):
         if not audio:
             raise RuntimeError("线上 TTS 返回了空音频")
 
-        # 是 wav 就记下真实采样率；不是也照样往下走（见上面 response_format 的注释）
         if audio[:4] == b"RIFF":
+            audio = fix_wav_sizes(audio)
             try:
                 _samples, rate = decode_wav(audio)
                 if rate:
@@ -166,6 +167,46 @@ class OpenAITtsEngine(TTSEngine):
             log.info("供应商没按 wav 返回（前 4 字节 %r），按原样透传", audio[:4])
 
         return audio
+
+
+def fix_wav_sizes(audio: bytes) -> bytes:
+    """把 WAV 头里两个长度字段改对。
+
+    ★ 为什么需要这个（实测踩到的）
+
+    硅基流动返回的 wav，**RIFF 段大小和 data 块长度都是占位值**：
+
+        RIFF 段大小字段 = 4294967206   （0xFFFFFFA6，应该是 总长-8）
+        data 块声明长度 = 4294967040   （0xFFFFFF00，应该是 实际剩余）
+        实际剩余字节    = 51840
+
+    因为它是**流式**生成音频的，事先不知道总长，就填了个「很大」的占位。
+    后果是浏览器 decodeAudioData 可能截断或直接报错 ——
+    而它报错的样子就是「她不出声」，很难查到这一步。
+
+    这里按实际字节数把两个字段填回去。**不改音频数据本身**，只改头。
+    """
+    if len(audio) < 44 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        return audio
+
+    buf = bytearray(audio)
+    # RIFF 段大小 = 总长 - 8（"RIFF" 4 字节 + 这个字段自己 4 字节）
+    struct.pack_into("<I", buf, 4, len(buf) - 8)
+
+    # 找 data 块，把它的长度改成「文件里实际剩下的字节数」
+    pos = 12
+    while pos + 8 <= len(buf):
+        chunk_id = bytes(buf[pos : pos + 4])
+        (size,) = struct.unpack_from("<I", buf, pos + 4)
+        if chunk_id == b"data":
+            struct.pack_into("<I", buf, pos + 4, len(buf) - pos - 8)
+            break
+        # 块长度是 4 字节对齐的；size 离谱（占位值）时没法按它跳，直接放弃
+        if size > len(buf):
+            break
+        pos += 8 + size + (size & 1)
+
+    return bytes(buf)
 
 
 def describe_http_error(err: Exception) -> str:
@@ -182,6 +223,7 @@ def describe_http_error(err: Exception) -> str:
             detail = ""
         hint = {
             401: "API key 不对或者没配",
+            402: "账号余额不足（这个模型是收费的，充点钱或者换 engine=edge）",
             403: "这个 key 没权限用这个模型",
             404: "地址或模型名不对（URL 要填到 /v1 为止）",
             429: "被限流了，或者余额不够",
