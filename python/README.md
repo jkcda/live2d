@@ -239,7 +239,7 @@ NEXUS_TTS_ENGINE=cosyvoice python -m service.main
 |---|---|---|
 | `NEXUS_HOST` | `127.0.0.1` | 监听地址 |
 | `NEXUS_PORT` | `8765` | 监听端口（改了要同步改前端的「服务地址」） |
-| `NEXUS_TTS_ENGINE` | `tone` | `tone` / `sapi`（Windows）/ `cosyvoice` |
+| `NEXUS_TTS_ENGINE` | `tone` | `tone` / `sapi`（Windows）/ `cosyvoice` / `edge` / `openai` |
 | `NEXUS_TTS_VOICE` | `default` | 默认音色 |
 | `NEXUS_SAMPLE_RATE` | `24000` | TTS 输出采样率 |
 | `NEXUS_VAD_ENGINE` | `energy` | `energy` / `silero` |
@@ -247,8 +247,59 @@ NEXUS_TTS_ENGINE=cosyvoice python -m service.main
 | `NEXUS_ASR_DEVICE` | `cpu` | `cpu` / `cuda:0` |
 | `NEXUS_COSYVOICE_DIR` | 空 | 模型目录，留空则找 `pretrained_models/CosyVoice2-0.5B` |
 | `NEXUS_COSYVOICE_WARMUP` | `0` | 设 `1` 则启动时预加载模型（慢启动，但首次请求快） |
+| `NEXUS_TTS_API_URL` | 空 | 线上 TTS 地址（`engine=openai` 时用），填到 `/v1` 为止 |
+| `NEXUS_TTS_API_KEY` | 空 | 线上 TTS 的 API key |
+| `NEXUS_TTS_API_MODEL` | `tts-1` | 线上 TTS 的模型名 |
+| `NEXUS_TTS_API_VOICE` | 空 | 线上 TTS 的音色，留空则用供应商默认 |
 | `NEXUS_SILERO_MODEL` | 空 | silero_vad.onnx 路径，留空则找 `python/models/` |
 | `NEXUS_CORS_ORIGINS` | `*` | 允许的跨域来源，逗号分隔 |
+
+---
+
+## 本地还是线上：怎么选
+
+两条路的瓶颈不一样，**坏的时机也不一样** —— 所以两条都留着。
+
+| | `cosyvoice`（本地） | `openai`（线上，任意 OpenAI 兼容端点） |
+|---|---|---|
+| 显存 | 实打实吃 2.65GB | **不占** |
+| 启动 | 加载 13~29 秒 + 预热 | **不用** |
+| 首块 | 2~4 秒；GPU 忙时能到 8 秒以上 | 看网络和供应商 |
+| 音色克隆 | 有（放参考音频 + 同名 .txt 到 `python/voices/`） | 看供应商支不支持 |
+| 联网 | 不用 | **要** |
+| 花钱 | 电费 | 按量计费 |
+| RTF | 空闲 0.8、GPU 忙时 1.5+ | 由供应商决定 |
+
+**本地跑不动、或者不想让它抢显存的时候，切线上；没网、或者不想花钱的时候，切回本地。**
+
+### 切到线上
+
+```powershell
+$env:NEXUS_TTS_ENGINE  = "openai"
+$env:NEXUS_TTS_API_URL = "https://api.siliconflow.cn/v1"
+$env:NEXUS_TTS_API_KEY = "sk-xxx"
+$env:NEXUS_TTS_API_MODEL = "FunAudioLLM/CosyVoice2-0.5B"
+.\tools\start-all.cmd
+```
+
+`start-all` 看到引擎不是 `cosyvoice` 就**不会启动 CosyVoice 模型服务** ——
+它要加载 2.65GB 显存、花十几秒预热，而那时根本用不上。
+
+> 用硅基流动的话，模型可以填 `FunAudioLLM/CosyVoice2-0.5B` ——
+> **和本地跑的是同一个模型**，音色接近，但不用占显存。
+
+### 关于 `openai` 这个引擎
+
+走的是 `POST {base}/audio/speech`，也就是 **OpenAI 那套形状**。
+选它不是因为要连 OpenAI，而是因为**这个形状已经是事实标准** ——
+硅基流动、以及一大批自建 TTS 服务（GPT-SoVITS / fish-speech / IndexTTS
+这些都有 OpenAI 兼容层）都认。
+
+**一个适配器覆盖很多家，换供应商不用改代码。**
+
+一个注意点：请求里带了 `response_format: "wav"`，因为下游（口型 / 播放）要的是 PCM。
+不支持的供应商会忽略它、返回 mp3 —— **也能放**（浏览器按内容嗅探，不看 content-type），
+只是采样率得从 WAV 头里读、mp3 读不到，会退回配置值。
 
 ---
 

@@ -54,6 +54,14 @@ class Settings:
     cosyvoice_model_dir: str
     cosyvoice_load_on_start: bool
 
+    # ---- 线上 TTS（engine=openai）----
+    # 任何 OpenAI 兼容的 /v1/audio/speech 端点。不占显存、不用预热，代价是联网 + 按量计费。
+    # URL 填到 /v1 为止（引擎自己拼 /audio/speech）
+    tts_api_url: str
+    tts_api_key: str
+    tts_api_model: str
+    tts_api_voice: str
+
     # ---- VAD ----
     # energy = 零依赖能量法（默认）；silero = 更准，需 onnxruntime + 模型
     vad_engine: str
@@ -76,6 +84,10 @@ class Settings:
             sample_rate=_env_int("NEXUS_SAMPLE_RATE", 24000),
             cosyvoice_model_dir=_env("NEXUS_COSYVOICE_DIR", ""),
             cosyvoice_load_on_start=_env("NEXUS_COSYVOICE_WARMUP", "0") == "1",
+            tts_api_url=_env("NEXUS_TTS_API_URL", "").strip(),
+            tts_api_key=_env("NEXUS_TTS_API_KEY", "").strip(),
+            tts_api_model=_env("NEXUS_TTS_API_MODEL", "tts-1").strip(),
+            tts_api_voice=_env("NEXUS_TTS_API_VOICE", "").strip(),
             vad_engine=_env("NEXUS_VAD_ENGINE", "energy").strip().lower(),
             asr_engine=_env("NEXUS_ASR_ENGINE", "none").strip().lower(),
             asr_device=_env("NEXUS_ASR_DEVICE", "cpu").strip().lower(),

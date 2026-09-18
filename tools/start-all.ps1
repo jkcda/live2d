@@ -116,12 +116,36 @@ function Start-Svc {
 
 Write-Host "`n=== 拉起服务（日志在 logs\）===" -ForegroundColor Cyan
 
+<#
+  TTS 引擎从环境变量来，默认 cosyvoice（本地）。
+
+  想换成线上（不占显存、不用预热、按量计费）：
+
+      $env:NEXUS_TTS_ENGINE = "openai"
+      $env:NEXUS_TTS_API_URL = "https://api.siliconflow.cn/v1"
+      $env:NEXUS_TTS_API_KEY = "sk-xxx"
+      $env:NEXUS_TTS_API_MODEL = "FunAudioLLM/CosyVoice2-0.5B"
+      .\tools\start-all.cmd
+
+  ★ 引擎不是 cosyvoice 时**不启动 CosyVoice 模型服务** ——
+    它要加载 2.65GB 显存、花十几秒预热，而那时根本用不上它。
+    显存留给别的东西，或者干脆省下来。
+#>
+$ttsEngine = if ($env:NEXUS_TTS_ENGINE) { $env:NEXUS_TTS_ENGINE } else { "cosyvoice" }
+# 提到哈希表外面：PowerShell 5.1 里 `@{ k = if (...) {} }` 是语法错误（7 才允许）
+$apiModel = if ($env:NEXUS_TTS_API_MODEL) { $env:NEXUS_TTS_API_MODEL } else { "tts-1" }
+
 # ① CosyVoice 模型服务：她自己的音色（GPU，加载 10~15 秒）
-$cosyRoot = if ($env:NEXUS_COSY_ROOT) { $env:NEXUS_COSY_ROOT } else { "D:\cosyvoice" }
-Start-Svc -Name "cosy" -Port $CosyPort -WorkDir $root `
-  -File (Join-Path $cosyRoot ".venv\Scripts\python.exe") `
-  -ArgList @((Join-Path $root "python\cosyvoice_server.py"), "--port", "$CosyPort") `
-  -Env @{ NEXUS_COSY_PORT = "$CosyPort"; PYTHONIOENCODING = "utf-8"; NEXUS_VOICES_DIR = (Join-Path $root "python\voices") }
+if ($ttsEngine -eq "cosyvoice") {
+  $cosyRoot = if ($env:NEXUS_COSY_ROOT) { $env:NEXUS_COSY_ROOT } else { "D:\cosyvoice" }
+  Start-Svc -Name "cosy" -Port $CosyPort -WorkDir $root `
+    -File (Join-Path $cosyRoot ".venv\Scripts\python.exe") `
+    -ArgList @((Join-Path $root "python\cosyvoice_server.py"), "--port", "$CosyPort") `
+    -Env @{ NEXUS_COSY_PORT = "$CosyPort"; PYTHONIOENCODING = "utf-8"; NEXUS_VOICES_DIR = (Join-Path $root "python\voices") }
+} else {
+  Write-Host "  (TTS 引擎是 $ttsEngine，跳过 CosyVoice 模型服务)" -ForegroundColor DarkGray
+  $rows += [pscustomobject]@{ 服务="CosyVoice 模型"; 端口="$CosyPort"; 结果="跳过"; 说明="引擎是 $ttsEngine" }
+}
 
 # ② 主推理服务：TTS 转发 + VAD/ASR（应用连的就是它）
 $asrEngine = if ($env:NEXUS_ASR_ENGINE) { $env:NEXUS_ASR_ENGINE } else { "sensevoice" }
@@ -141,8 +165,13 @@ Start-Svc -Name "service" -Port $ServicePort -WorkDir (Join-Path $root "python")
   -File (Join-Path $root "python\.venv\Scripts\python.exe") -ArgList @("-m", "service.main") `
   -Env @{
     NEXUS_PORT          = "$ServicePort"
-    NEXUS_TTS_ENGINE    = "cosyvoice"
+    NEXUS_TTS_ENGINE    = $ttsEngine
     NEXUS_COSYVOICE_URL = "http://127.0.0.1:$CosyPort"
+    # 线上引擎（engine=openai）的配置。引擎不是它的时候这些是无害的多余变量
+    NEXUS_TTS_API_URL   = "$env:NEXUS_TTS_API_URL"
+    NEXUS_TTS_API_KEY   = "$env:NEXUS_TTS_API_KEY"
+    NEXUS_TTS_API_MODEL = $apiModel
+    NEXUS_TTS_API_VOICE = "$env:NEXUS_TTS_API_VOICE"
     NEXUS_ASR_ENGINE    = $asrEngine
     NEXUS_VAD_ENGINE    = "energy"
     PYTHONIOENCODING    = "utf-8"

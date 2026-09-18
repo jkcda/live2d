@@ -8,12 +8,25 @@ from .tone import ToneEngine
 
 __all__ = ["TTSEngine", "ToneEngine", "create_engine", "AVAILABLE_ENGINES"]
 
-AVAILABLE_ENGINES = ("tone", "edge", "sapi", "cosyvoice")
+AVAILABLE_ENGINES = ("tone", "edge", "sapi", "cosyvoice", "openai")
 
 
 def create_engine(name: str | None = None) -> TTSEngine:
     """按名字创建引擎。名字无效时退回 tone —— 开发服务不该因为配错就起不来。"""
     key = (name or settings.engine or "tone").strip().lower()
+
+    if key == "openai":
+        # 任何 OpenAI 兼容的线上 TTS（/v1/audio/speech）。
+        # 不占显存、不用预热，代价是联网 + 按量计费。见 openai_tts.py 顶部的对比。
+        from .openai_tts import OpenAITtsEngine
+
+        return OpenAITtsEngine(
+            base_url=settings.tts_api_url,
+            api_key=settings.tts_api_key,
+            model=settings.tts_api_model,
+            voice=settings.tts_api_voice or settings.default_voice,
+            sample_rate=settings.sample_rate,
+        )
 
     if key == "edge":
         # 在线语音：一个包 + 联网，十分钟就能听到真人级的声音（推荐的第一跳）
