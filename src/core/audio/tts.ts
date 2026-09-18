@@ -9,7 +9,7 @@
  * 这里只负责调用和排队。服务没起来时静默降级为「只显示文字，不出声」。
  */
 import type { AudioPlayer } from './player'
-import { getSplitMaxChars, setSplitMaxChars } from '../agent/llm'
+import { getSplitMaxChars, setSplitMaxChars, setSplitMode } from '../agent/llm'
 
 export interface TTSConfig {
   /** Python 推理服务地址，例如 http://127.0.0.1:8765 */
@@ -238,32 +238,37 @@ export class VoiceOutput {
       const slow = name.startsWith('cosyvoice')
 
       /*
-       * ★ 切分：**所有引擎都整段**，不按引擎分。
+       * ★ 两种模式，按引擎的 RTF 选。设 RTF = 合成时间 / 音频时长、每句时长 d：
        *
-       * 我中途给慢引擎设过「24 字切一刀」—— 那是我为了「把停顿藏到句号处」
-       * 自己加的，用户从来没要过。结果 45 字的回复被切成 2 段、2 次独立合成，
-       * 听起来是**两口气**。用户的原话：「不是一整段吗怎么还是不会一口气说完」。
+       *     整段   开口 = RTF × 总时长      句间停顿 无
+       *     逐句   开口 = RTF × d           句间停顿 (RTF−1) × d
        *
-       * 用户要的是「一口气说完」，那就整段 —— 停顿宁可让它出现在整段之后。
+       * · **快的引擎（云端 0.14）→ 整段**：它根本不会停，而且整段语气连贯
+       * · **慢的引擎（本地 > 1）→ 逐句**：开口早得多（RTF×d 而不是 RTF×总时长），
+       *   代价是句间有停顿 —— 但那个停顿落在**句号处**，听起来是换气
        *
-       * ★ 流式：**只有快的引擎开**。
+       * 实测本地：整段要等 25~34 秒才开口（48 字 / 66 字）。
+       * 逐句的话开口只要「第一句的合成时间」，通常 6~10 秒 —— **早三倍**。
        *
-       * RTF > 1 时流式不可能不卡（生产慢于消费，缓冲迟早耗尽）。
-       * 实测本地：13.4s 音频要 29.1s 合成。开着流式 = 说到一半断；
-       * 关掉 = 等整段合成完，但**一口气说完不断**。
-       *
-       * 两件事分开：切分是「分成几次说」，流式是「一次里怎么播」。
+       * ★ 关于「并行」：模型有锁，真并行做不到。但也不需要 ——
+       *   第 N+1 句的合成和第 N 句的**播放**重叠（合成并行、播放串行），
+       *   这个流水线是这个类的立身之本，一直在。
        */
-      const nextSplit = 150
+      const bySentence = slow
+      // 逐句模式下这个值只是「模型不吐标点时强切」的兜底，60 字够了；
+      // 整段模式下它是「一段最多多少字」，150。
+      const nextSplit = slow ? 60 : 150
+      // 慢引擎**不流式** —— RTF > 1 时流式不可能不卡（生产慢于消费，缓冲迟早耗尽）
       const nextStreamMin = slow ? Number.MAX_SAFE_INTEGER : 20
 
       if (nextSplit !== getSplitMaxChars()) {
         console.log(
-          `[tts] 引擎 ${name} → 整段合成（最多 ${nextSplit} 字）` +
-            `｜${slow ? '不流式（RTF > 1，流式必卡 → 等整段合成完再开口）' : '长段走流式'}`,
+          `[tts] 引擎 ${name} → ${bySentence ? '按句切（开口早，句间有停顿）' : '整段合成（语气连贯）'}` +
+            `｜${slow ? '不流式（RTF > 1，流式必卡）' : '长段走流式'}`,
         )
       }
       setSplitMaxChars(nextSplit)
+      setSplitMode(bySentence)
       streamMinChars = nextStreamMin
       return name
     } catch {

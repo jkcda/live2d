@@ -129,6 +129,31 @@ export async function* streamChat(
 let splitMaxChars = 150
 
 /**
+ * 是否**按句末标点切**（而不是攒到上界才切）。
+ *
+ * ★ 为什么这个开关值得存在
+ *
+ * 设 RTF = 合成时间 / 音频时长，每句时长 d：
+ *
+ *     整段   开口 = RTF × 总时长      句间停顿 无
+ *     逐句   开口 = RTF × d           句间停顿 (RTF−1) × d
+ *
+ * **逐句用「更小的初始等待」换「句子间的小停顿」**，而那个停顿落在句号处 ——
+ * 听起来是换气而不是卡。
+ *
+ * 而且只要 **RTF ≤ 1**，`(RTF−1) × d` 就是 0 —— **逐句在两头都赢**
+ * （早开口 + 无缝）。RTF 一过 1 就反过来了：整段那个 25 秒的沉默
+ * 比句子间的停顿更伤。
+ *
+ * 所以这个开关跟着引擎的 RTF 走，见 tts.ts 的 probeEngine。
+ */
+let splitBySentence = false
+
+export function setSplitMode(bySentence: boolean): void {
+  splitBySentence = bySentence
+}
+
+/**
  * 按引擎速度调整切分粒度。
  *
  * 为什么是模块级的可变值：切分发生在 agent 层（这里），而**引擎信息在音频层**
@@ -148,11 +173,38 @@ export function createSentenceSplitter() {
 
   return {
     /**
-     * 喂入增量。**只在超过上界时才返回内容**，否则一直攒着 ——
-     * 真正的整段提交发生在 `flush()`。
+     * 喂入增量。
+     *
+     * 两种模式：
+     *   · 逐句（splitBySentence）—— 每个句末标点就送一次。开口早，代价是句子间有停顿
+     *   · 整段（默认）—— 攒到上界才送，真正的提交发生在 flush()。停顿集中在最后
      */
     push(chunk: string): string[] {
       pending += chunk
+      const out: string[] = []
+
+      if (splitBySentence) {
+        // 中文句末标点 + 英文句末标点 + 换行
+        const boundary = /[。！？；\n!?;]+/g
+        let lastIndex = 0
+        let match: RegExpExecArray | null
+        while ((match = boundary.exec(pending)) !== null) {
+          const end = match.index + match[0].length
+          const sentence = pending.slice(lastIndex, end).trim()
+          if (sentence) out.push(sentence)
+          lastIndex = end
+        }
+        pending = pending.slice(lastIndex)
+
+        // 兜底：模型不吐标点时强切，避免一直不发声
+        if (pending.length >= splitMaxChars) {
+          out.push(pending.trim())
+          pending = ''
+        }
+        return out
+      }
+
+      // 整段模式：不到上界什么都不送
       if (pending.length < splitMaxChars) return []
 
       /*
