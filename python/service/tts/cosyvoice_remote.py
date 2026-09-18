@@ -136,3 +136,41 @@ class CosyVoiceRemoteEngine(TTSEngine):
         if peak > 0:
             samples = samples / peak * 0.95
         return encode_wav(samples, self._last_rate)
+
+    def stream_raw(self, text: str, voice: str, speed: float):
+        """把 8788 的 /tts/stream **原样透传**出去（同步生成器）。
+
+        ★ 为什么不在这里解析帧
+
+        帧协议（4 字节长度 + 内容）是 **8788 和客户端之间**的约定。
+        中间这一层多解析一次，就多一个「协议改了这里忘了改」的地方 ——
+        而它一旦不同步，表现是音频莫名其妙地断，非常难查。
+        这一层只负责两件事：转发，以及**别缓冲**。
+
+        ★ 为什么用 read1 而不是 read
+
+        `read(n)` 会一直阻塞到凑够 n 字节 —— 那就等于把流式又攒回成批量了。
+        `read1(n)` 是「有多少给多少」，最多一次底层读。
+        这个区别就是「流式」和「看起来像流式」的分界。
+
+        ★ 为什么不做归一化
+
+        上面 synthesize() 那层「兜底归一化」在流式下做不到（拿不到全段峰值）。
+        8788 已经用开机标定的固定增益处理过了，这里不再动它。
+        """
+        import json
+        import urllib.request
+
+        payload = json.dumps({"text": text, "voice": voice, "speed": speed}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self._url}/tts/stream",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            while True:
+                chunk = resp.read1(8192)
+                if not chunk:
+                    break
+                yield chunk

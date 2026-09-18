@@ -17,7 +17,7 @@ import logging
 
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .asr import create_asr
@@ -187,6 +187,51 @@ async def tts(req: TTSRequest) -> Response:
             "X-Engine": engine.name,
             "X-Sample-Rate": str(engine.sample_rate),
             "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/tts/stream")
+async def tts_stream(req: TTSRequest) -> StreamingResponse:
+    """流式合成：边合成边把音频吐给客户端。
+
+    ★ 收益是「她多久开口」，不是「总共多快」
+
+    非流式那条路要等整段合成完（实测 31 字：首块 3.8s、总计 7.6s），
+    流式把「她开口」提前到首块到达的时刻，省掉的是后面那几秒。
+
+    **但有两个前提，缺了它反而更糟：**
+      · 短句常常只有 1~2 块 —— 首块 ≈ 总计，流式收益接近 0
+      · RTF > 1 时生产慢于播放，播到中间会追不上合成而卡顿。
+        这台机器上空闲 0.82、GPU 忙时 1.6，所以「会不会卡」取决于当时在跑什么
+
+    ★ 引擎不支持时明确报 501，不假装成功
+
+    其它引擎（edge / sapi / tone）没有流式实现。这里不能悄悄退回非流式 ——
+    调用方是按流式的节奏去消费的，给它一整段 WAV 会解析失败。
+    明确报错，前端据此走非流式那条路。
+    """
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text 不能为空")
+
+    ready, reason = engine.availability()
+    if not ready:
+        raise HTTPException(status_code=503, detail=reason)
+
+    streamer = getattr(engine, "stream_raw", None)
+    if streamer is None:
+        raise HTTPException(status_code=501, detail=f"引擎 {engine.name} 不支持流式合成")
+
+    return StreamingResponse(
+        streamer(text, req.voice, req.speed),
+        media_type="application/octet-stream",
+        headers={
+            "X-Engine": engine.name,
+            "X-Sample-Rate": str(engine.sample_rate),
+            "Cache-Control": "no-store",
+            # 别让中间层缓冲 —— 否则「流式」到不了客户端
+            "X-Accel-Buffering": "no",
         },
     )
 

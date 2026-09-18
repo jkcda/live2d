@@ -27,8 +27,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import struct
 import sys
 import threading
 import time
@@ -85,7 +87,7 @@ _patch_modelscope_offline_first()
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
-from fastapi.responses import Response  # noqa: E402
+from fastapi.responses import Response, StreamingResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from cosyvoice.cli.cosyvoice import CosyVoice2  # noqa: E402
@@ -110,6 +112,83 @@ _lock = threading.Lock()
 
 #: 已注册的音色 → 参考音频路径（排查"为什么我的音色没生效"时看它）
 registered: dict[str, str] = {}
+
+# ── 流式 ──
+#
+# 非流式那条路能对**整段**做峰值归一化（除完乘 0.95），流式不行 ——
+# 块是一块一块吐的，拿不到全段峰值。所以改成开机时标定一个固定增益。
+#
+# 为什么固定增益可行：同一个音色、同一套风格，模型输出的峰值是稳定的
+# （见上面 tts() 里那句注释：峰值只有 0.6~0.7）。标定几句有代表性的，
+# 取其中**最大的**那个峰值反推增益 —— 宁可整体略轻也不要削波，
+# 削波毁的是音色，音量轻一点只是轻一点。
+stream_gain = 1.0
+
+# 流式的帧协议：4 字节小端长度 + 内容，长度 0 表示结束。
+# 第一帧是 JSON 头（采样率/声道/增益），后面每帧是 s16le 的 PCM。
+#
+# 为什么不用 chunked WAV：WAV 头里的长度字段在流式下是假的，
+# 而浏览器的 decodeAudioData **吃不了半截流** —— 客户端反正要自己解析，
+# 那就用一个最省事、最好调的格式。
+_STREAM_HEADER_FMT = "<I"
+
+
+def stream_frame(payload: bytes) -> bytes:
+    """一帧：4 字节长度 + 内容"""
+    return struct.pack(_STREAM_HEADER_FMT, len(payload)) + payload
+
+
+def to_pcm16(samples) -> bytes:
+    """float32 [-1,1] → s16le。乘固定增益后夹紧。"""
+    scaled = np.clip(np.asarray(samples, dtype=np.float32) * stream_gain, -1.0, 1.0)
+    return (scaled * 32767).astype("<i2").tobytes()
+
+
+def calibrate_stream_gain(voice: str) -> None:
+    """标定流式用的固定增益（开机跑一次）。
+
+    代价是启动多花几秒（两句合成）。这个代价只在启动时付一次，
+    而它换来的是「流式和流式之间音量一致」—— 不标定的话只能拍一个数，
+    而这个数直接决定口型幅度（口型是按振幅驱动的），拍错了嘴就不动。
+
+    取多句里的**最大峰值**：宁可整体轻一点，也不要削波。
+    """
+    global stream_gain
+
+    probes = ["嗯，我在。", "今天天气还不错，你要是想出去走走的话，记得带件外套，晚上会凉。"]
+    peaks: list[float] = []
+    t0 = time.time()
+
+    for text in probes:
+        try:
+            for out in model.inference_zero_shot(text, "", "", voice, stream=True, speed=1.0):
+                wav = out["tts_speech"].squeeze(0).cpu().numpy()
+                peak = float(np.max(np.abs(wav))) if wav.size else 0.0
+                if peak > 0:
+                    peaks.append(peak)
+        except Exception as err:  # noqa: BLE001
+            log.warning("增益标定失败（用默认 1.0）：%r", err)
+            return
+
+    if not peaks:
+        log.warning("增益标定没拿到音频，用默认 1.0")
+        return
+
+    # 取最大峰值，再留 5% 余量 —— 标定的两句不可能覆盖所有句子，
+    # 留点余量比事后削波强（削波毁音色，音量低一点只是低一点）
+    worst = max(peaks) * 1.05
+    stream_gain = round(0.95 / worst, 3) if worst > 0 else 1.0
+
+    # 实测（8 句不同长度）：原始峰值 0.624~0.848，1.36x = 2.7 dB。
+    # 也就是说固定增益带来的句间音量差最多 2.7 dB —— 在正常说话起伏范围内，
+    # 不会听出「音量在跳」。这个数要是再大（比如 6 dB 以上）就得换方案了。
+    log.info(
+        "流式增益标定 %.3f（标定峰值 %.3f~%.3f，%.1fs）",
+        stream_gain,
+        min(peaks),
+        max(peaks),
+        time.time() - t0,
+    )
 
 
 class TTSRequest(BaseModel):
@@ -191,6 +270,10 @@ def load_model(fp16: bool, jit: bool = False) -> None:
         for _ in model.inference_zero_shot("嗯，我在。", "", "", list(registered)[0], stream=True):
             pass
     log.info("预热完成 %.1fs｜可用音色：%s", time.time() - t1, ", ".join(registered))
+
+    # 流式的固定增益：标定挂在预热后面（内核已经热了，量出来才准）
+    with _lock:
+        calibrate_stream_gain(list(registered)[0])
 
 
 @app.get("/health")
@@ -405,6 +488,80 @@ def tts(req: TTSRequest) -> Response:
             #   表现是整个 /tts 500（而且是"只有中文名音色才 500"这种最难猜的规律）。
             "X-Voice": quote(voice, safe=""),
             "X-Sample-Rate": str(sample_rate),
+        },
+    )
+
+
+@app.post("/tts/stream")
+def tts_stream(req: TTSRequest) -> StreamingResponse:
+    """边合成边发。
+
+    ★ 为什么要有它
+
+    非流式那条路是「攒齐所有块 → torch.cat → 拼 WAV → 一次返回」，
+    于是首块那几秒完全是干等。实测（tools/bench-tts.py，空闲机器）：
+
+        5 字   首块 2.03s / 总计 2.75s   → 首块占 74%
+        31 字  首块 3.77s / 总计 7.57s   → 流式能省 3.8s
+
+    **回复越长收益越大；短句本来就一两块，收益接近 0。**
+
+    ★ 和 /tts 的区别不止「分块发」
+
+    /tts 对整段做峰值归一化（除完乘 0.95），流式做不到 ——
+    所以流式用**开机标定的固定增益**（见 calibrate_stream_gain）。
+    两条路音量可能有细微差别，但都保证不削波。
+    """
+    if model is None:
+        raise HTTPException(status_code=503, detail="模型还没加载完")
+
+    voice = req.voice if req.voice in registered else (list(registered)[0] if registered else "")
+    if not voice:
+        raise HTTPException(status_code=503, detail="没有任何可用音色")
+
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text 不能为空")
+
+    # 第一帧是 JSON 头：客户端得先知道采样率才能把 PCM 包成 AudioBuffer
+    header = json.dumps(
+        {
+            "sampleRate": sample_rate,
+            "channels": 1,
+            "format": "s16le",
+            "gain": stream_gain,
+            "voice": voice,
+            "engine": "cosyvoice2",
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    def gen():
+        yield stream_frame(header)
+
+        # 合成不是线程安全的（同一份 KV cache），串行化。
+        # 锁要**跨整个生成过程**持有 —— 和 /tts 一样，区别只是这次中途会 yield。
+        # 客户端断开时生成器被关闭，with 退出，锁正常释放。
+        with _lock:
+            for out in model.inference_zero_shot(text, "", "", voice, stream=True, speed=req.speed):
+                wav = out["tts_speech"].squeeze(0).cpu().numpy()
+                if wav.size:
+                    yield stream_frame(to_pcm16(wav))
+
+        # 长度 0 = 结束。这也是客户端唯一能区分
+        # 「正常说完」和「连接断了」的信号。
+        yield stream_frame(b"")
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/octet-stream",
+        headers={
+            "X-Engine": "cosyvoice2",
+            "X-Voice": quote(voice, safe=""),
+            "X-Sample-Rate": str(sample_rate),
+            "Cache-Control": "no-store",
+            # 别让中间层缓冲 —— 否则「流式」根本到不了客户端
+            "X-Accel-Buffering": "no",
         },
     )
 
