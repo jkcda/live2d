@@ -120,29 +120,29 @@ class OpenAITtsEngine(TTSEngine):
     # ---- 合成 ----
 
     async def synthesize(self, text: str, voice: str, speed: float) -> bytes:
-        payload = {
-            "model": self._model,
-            "input": text,
-            "voice": voice or self._voice,
-            # ★ 要 wav 而不是默认的 mp3。
-            #   下游（口型/播放）拿的是 PCM，wav 能直接读出采样率；
-            #   mp3 得再解一层，而多引一个解码库不值得。
-            #   不支持的供应商会忽略这个字段 —— 那时拿回来的是 mp3，
-            #   浏览器 decodeAudioData 照样能放（它按内容嗅探，不看 content-type）。
-            "response_format": "wav",
-            "speed": max(0.25, min(4.0, float(speed or 1.0))),
-        }
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self._base}/audio/speech",
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._key}",
-            },
-        )
+        def build(v: str) -> urllib.request.Request:
+            payload = {
+                "model": self._model,
+                "input": text,
+                "voice": v,
+                # ★ 要 wav 而不是默认的 mp3。
+                #   下游（口型/播放）拿的是 PCM，wav 能直接读出采样率；
+                #   mp3 得再解一层，而多引一个解码库不值得。
+                #   不支持的供应商会忽略这个字段 —— 那时拿回来的是 mp3，
+                #   浏览器 decodeAudioData 照样能放（它按内容嗅探，不看 content-type）。
+                "response_format": "wav",
+                "speed": max(0.25, min(4.0, float(speed or 1.0))),
+            }
+            return urllib.request.Request(
+                f"{self._base}/audio/speech",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self._key}",
+                },
+            )
 
-        def _call() -> bytes:
+        def call(req: urllib.request.Request) -> bytes:
             # 同步阻塞的 urllib 放线程里，别把事件循环堵住（口型/打断还要靠它）
             try:
                 with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
@@ -151,10 +151,33 @@ class OpenAITtsEngine(TTSEngine):
                 # 翻成人话再抛 —— 这个字符串会一路显示到用户界面上
                 raise RuntimeError(describe_http_error(err)) from err
 
-        audio = await asyncio.to_thread(_call)
+        wanted = voice or self._voice
+        try:
+            audio = await asyncio.to_thread(call, build(wanted))
+        except RuntimeError as err:
+            # ★ 音色被拒时退回自己配的那个。
+            #
+            # 这个场景很常见：**前端有自己的音色设置**（存 localStorage，默认 "default"），
+            # 它会覆盖这里配的 NEXUS_TTS_API_VOICE。而线上供应商对音色的要求比本地严
+            # （硅基流动必须写成「模型名:音色名」），于是前端那个值直接被 400 拒掉。
+            #
+            # 表现是「一点声音都没有」，而日志里只有一行 Invalid voice ——
+            # 用户根本不知道要回去改设置面板。
+            #
+            # 所以这里退回配置值重试一次，并**大声警告**：
+            # 能出声，但根因（前端音色配错了）得让用户知道。
+            if not _is_voice_error(str(err)) or wanted == self._voice:
+                raise
+            log.warning(
+                "音色 %r 被供应商拒了，退回配置的 %r 重试一次。"
+                "想用前者的话，去应用的设置面板把「音色」改成它（这个值优先于环境变量）",
+                wanted,
+                self._voice,
+            )
+            audio = await asyncio.to_thread(call, build(self._voice))
+
         if not audio:
             raise RuntimeError("线上 TTS 返回了空音频")
-
         if audio[:4] == b"RIFF":
             audio = fix_wav_sizes(audio)
             try:
@@ -207,6 +230,21 @@ def fix_wav_sizes(audio: bytes) -> bytes:
         pos += 8 + size + (size & 1)
 
     return bytes(buf)
+
+
+def _is_voice_error(message: str) -> bool:
+    """这个错误是不是「音色名不被认」。
+
+    判据故意放宽：**消息里同时出现 voice（或「音色」）和 invalid/400 这类词**。
+    各家措辞不一样（硅基流动是 `Invalid voice.`），但这类错误的文案基本都带 voice。
+
+    **判错的代价只是「不重试」** —— 不会掩盖别的错误，因为重试用的还是同一个
+    请求、只换了音色。所以这里不需要精确。
+    """
+    low = message.lower()
+    has_voice = "voice" in low or "音色" in message
+    has_bad = "invalid" in low or "400" in low or "not support" in low or "不" in message
+    return has_voice and has_bad
 
 
 def describe_http_error(err: Exception) -> str:
