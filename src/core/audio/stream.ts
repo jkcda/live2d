@@ -139,6 +139,26 @@ export class VoiceInput {
     }
   }
 
+  /**
+   * 手动结束这一轮说话：告诉服务端「我说完了」。
+   *
+   * ★ 为什么要有它
+   *
+   * 服务端原来靠 VAD 报静音来自动收尾 —— 但那个判定太敏感：
+   * **停半秒喘口气就被切成一句**，用户听到的是半截话，
+   * 而且下一句还会被当成新的一轮。
+   *
+   * **「我说完了」只有用户自己知道**，所以改成显式通知。
+   *
+   * 注意它**不等**识别结果 —— 结果走 `asr` 事件回来，由调用方决定什么时候断开。
+   * 这里只负责把「我完了」这个信号发出去（本地状态先按"已经说完"处理）。
+   */
+  finish(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'flush' }))
+    }
+  }
+
   private setStatus(status: VoiceInputStatus, detail?: string): void {
     this._status = status
     this.opts.onStatus?.(status, detail)

@@ -132,6 +132,8 @@ const micOn = ref(false)
 const voiceStatus = ref<VoiceInputStatus>('idle')
 const hearing = ref(false)
 const recognizing = ref(false)
+/** 手动结束中：已发 flush、正等识别结果回来 */
+const finishing = ref(false)
 
 const name = DEFAULT_PERSONA.name
 
@@ -186,6 +188,19 @@ onMounted(() => {
       recognizing.value = true
     } else if (event.type === 'asr') {
       recognizing.value = false
+
+      /*
+       * 手动模式下，识别结果是「这一轮的终点」：
+       * 收到它才断开麦克风，然后才把文字发出去。
+       *
+       * 顺序不能反 —— 麦克风还开着的话，她的回复会被自己听到、
+       * 触发 barge-in 把自己掐断（表现是「她刚开口就停」）。
+       */
+      if (finishing.value) {
+        finishing.value = false
+        voiceInput.stop()
+      }
+
       const text = event.text.trim()
       if (text) {
         void sendText(text)
@@ -286,9 +301,31 @@ function stop() {
 
 async function toggleMic() {
   if (micOn.value) {
-    voiceInput.stop()
+    /*
+     * ★ 手动结束这一轮说话。
+     *
+     * 不能直接 `voiceInput.stop()` —— 那会把还在路上的识别结果一起掐掉
+     * （服务端要几百毫秒才能把音频转成文字）。
+     *
+     * 也不能「先改状态就完事」：麦克风得真的关掉，否则她的回复
+     * 会被自己的麦克风听到、触发 barge-in 掐断自己。
+     *
+     * 所以顺序是：发 flush → 等服务端回 asr → 断开 → 再把文字发出去。
+     */
     micOn.value = false
     hearing.value = false
+    recognizing.value = true
+    finishing.value = true
+    voiceInput.finish()
+
+    // 兜底：3 秒还没等到 asr 就断开，别把麦克风一直占着
+    window.setTimeout(() => {
+      if (finishing.value) {
+        finishing.value = false
+        recognizing.value = false
+        voiceInput.stop()
+      }
+    }, 3000)
     return
   }
 

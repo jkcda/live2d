@@ -11,6 +11,8 @@
     <binary>                      原始 PCM，int16 小端，16kHz 单声道
     {"type":"interrupt"}          用户插话：重置 VAD、丢弃正在累积的语音
     {"type":"reset"}              同上（语义别名，前端用哪个都行）
+    {"type":"flush"}              **我说完了** —— 把累积的音频送去识别
+    {"type":"stop"}               同上（语义别名）
 
 下行
     {"type":"ready", ...}         连接建立，报告引擎与帧格式
@@ -18,6 +20,20 @@
     {"type":"asr_start"}          语音结束，开始识别（UI 可以显示「识别中…」）
     {"type":"asr", "text":"...", "final":true}
     {"type":"error", "message":"..."}
+
+## 什么时候收尾：手动，不是自动
+
+**VAD 报静音不再触发识别。** 只有客户端发 `flush` 才收尾。
+
+原因：VAD 的静音判定太敏感 —— 停半秒喘口气就被切成一句，
+用户听到的是半截话，下一句还会被当成新的一轮。
+**「我说完了」只有用户自己知道。**
+
+VAD 仍然在跑，它现在只干两件事：
+  · 给前端做 **barge-in**（`vad: speech` → 掐断 TTS）
+  · 记录语音边界（预滚缓冲靠它保住第一个音节）
+
+`MAX_UTTERANCE_MS` 那条兜底必须留着 —— 手动模式下一个忘了按停的人会把内存吃满。
 
 ## 并发模型
 
@@ -146,6 +162,22 @@ class StreamSession:
             self._utterance_samples = 0
             self._speaking = False
             await self._emit({"type": "vad", "state": "silence", "probability": 0.0})
+            return
+
+        if kind in ("flush", "stop"):
+            # ★ 手动结束这一轮说话：把累积的音频送去识别。
+            #
+            # 以前是 **VAD 一报静音就自动收尾** —— 但那个判定太敏感：
+            # 停半秒喘口气就被切成一句，用户听到的是半截话，
+            # 而且下一句还会被当成新的一轮。
+            #
+            # **「我说完了」这件事只有用户自己知道**，所以改成客户端显式通知。
+            #
+            # VAD 仍然在跑，它现在只干两件事：
+            #   · 给前端做 barge-in（`vad: speech` → 掐断 TTS）
+            #   · 记录语音边界（预滚缓冲靠它保住第一个音节）
+            self._flush_utterance()
+            return
 
     async def _on_audio(self, data: bytes) -> None:
         self._raw.extend(data)
@@ -178,15 +210,15 @@ class StreamSession:
             )
             if event.state == "speech":
                 self._begin_utterance()
-            else:
-                self._flush_utterance()
+            # ★ 静音**不再自动收尾** —— 见下面 flush 的注释
 
         if self._speaking:
             self._utterance.append(samples)
             self._utterance_samples += samples.size
 
             if self._utterance_samples > SAMPLE_RATE * MAX_UTTERANCE_MS // 1000:
-                # 说太久了，强制切断去识别
+                # 说太久了，强制切断去识别（这条兜底必须留着 ——
+                # 手动模式下一个忘了按停的人会把内存吃满）
                 self._flush_utterance()
 
     # ------------------------------------------------------------ 语音片段
