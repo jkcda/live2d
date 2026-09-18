@@ -9,6 +9,7 @@
  * 这里只负责调用和排队。服务没起来时静默降级为「只显示文字，不出声」。
  */
 import type { AudioPlayer } from './player'
+import { setSplitMaxChars } from '../agent/llm'
 
 export interface TTSConfig {
   /** Python 推理服务地址，例如 http://127.0.0.1:8765 */
@@ -165,6 +166,51 @@ export class VoiceOutput {
       return resp.ok
     } catch {
       return false
+    }
+  }
+
+  /**
+   * 探一次服务端用的是哪个引擎，按它的速度调整切分粒度。
+   *
+   * ★ 为什么切分粒度要跟着引擎走
+   *
+   * 实测（同一台机器）：
+   *
+   *     云端 siliconflow   RTF 0.14              几乎不随长度恶化
+   *     本地 cosyvoice     RTF 1.00~1.86（10→20 字）  随长度明显恶化
+   *
+   * RTF > 1 意味着合成比播放慢，播放迟早追上合成、**中间必须停一下**。
+   * 而那个「停」落在哪里决定你听到什么：
+   *
+   *   · 停在句号处 → 像换气，自然
+   *   · 停在句子中间 → 「快说出来了突然停一下」，明显是卡
+   *
+   * 所以：**快的引擎整段合成（语气连贯），慢的引擎切短（让停顿落在句号处）。**
+   *
+   * 探不到就保持默认（整段）—— 云端是更好的默认值。
+   */
+  async probeEngine(): Promise<string> {
+    const cfg = this.getConfig()
+    if (!cfg.baseURL) return ''
+
+    try {
+      const resp = await fetch(`${trimSlash(cfg.baseURL)}/health`, {
+        signal: AbortSignal.timeout(2000),
+      })
+      if (!resp.ok) return ''
+
+      const data = (await resp.json()) as { engine?: unknown }
+      const name = typeof data.engine === 'string' ? data.engine : ''
+      if (!name) return ''
+
+      // cosyvoice-remote = 转发到本机那个模型（跑在同一块显卡上，RTF > 1）
+      // openai / edge = 线上，快
+      const slow = name.startsWith('cosyvoice')
+      setSplitMaxChars(slow ? 24 : 150)
+      return name
+    } catch {
+      // 服务没起来：不改，保持默认
+      return ''
     }
   }
 

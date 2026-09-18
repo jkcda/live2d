@@ -17,6 +17,17 @@ export const audioPlayer = new AudioPlayer()
 /** 语音输出队列（读的是实时配置，改设置后立即生效） */
 export const voiceOutput = new VoiceOutput(audioPlayer, () => loadTTSConfig())
 
+/*
+ * 启动时探一次服务端引擎，按它的快慢定切分粒度。
+ *
+ * 云端 RTF 0.14 → 整段合成（语气连贯）；本地 cosyvoice RTF > 1 → 切短
+ * （让播放追上合成时那个停顿落在句号处，听起来是换气而不是卡住）。
+ * 详见 VoiceOutput.probeEngine 的注释。
+ *
+ * 不 await：这是个后台优化，探不到就用默认值（整段），不该拖住启动。
+ */
+void voiceOutput.probeEngine()
+
 /**
  * agent 事件订阅者。
  *

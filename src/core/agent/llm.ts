@@ -106,21 +106,42 @@ export async function* streamChat(
 /**
  * 一次合成最多多少字。超过就切一刀。
  *
- * ★ 现在**不再按句号切**了 —— 整段合成。
+ * ★ 这个值**取决于引擎有多快**，不是固定的
  *
- * 用户的原话：「把本地也换成整段全部合成声音再给吧，逐句给太拉了」。
- * 每一段都是独立的 TTS 调用、各自有完整的语调收尾，所以「两句话」听起来像两段。
- * 整段一次合成，模型看到完整上下文，语气是连贯的。
+ * 实测（同一台机器）：
  *
- * ★ 这个上界不是为了语气，是为了**别让一次请求太长**
+ *   引擎               RTF      首块
+ *   云端 siliconflow   0.14     0.4~0.9s   几乎不随长度恶化
+ *   本地 cosyvoice     1.00~1.86（10 字→20 字）  随长度明显恶化
  *
- * 150 字 ≈ 27 秒音频。本地 RTF 在 0.74~1.62 之间（GPU 一忙就 > 1），
- * 一次合成太久的话，播放会追上合成、中间卡顿。
- * 150 字以内播放和合成基本同速，不会卡。
+ * RTF > 1 意味着**合成比播放慢**，播放迟早追上合成、中间必须停一下。
+ * 而**这个「停」落在哪里，决定你听到什么**：
  *
- * 云端 RTF 0.14（实测），这个上界根本不会触发。
+ *   · 停在句号处 → 听起来是换气，自然
+ *   · 停在句子中间 → 「快说出来了突然停一下」，明显是卡
+ *
+ * 所以：
+ *   · **快的引擎（RTF < 1）**：整段合成。它根本不会停，而且整段语气连贯
+ *   · **慢的引擎（RTF > 1）**：切短。让停顿时常落在句号处，听起来是换气
+ *
+ * 默认 150（整段）。`setSplitMaxChars()` 会在探测到引擎后改掉它 —— 见 tts.ts。
  */
-const SPLIT_MAX_CHARS = 150
+let splitMaxChars = 150
+
+/**
+ * 按引擎速度调整切分粒度。
+ *
+ * 为什么是模块级的可变值：切分发生在 agent 层（这里），而**引擎信息在音频层**
+ * （要问服务端 /health 才知道）。让 agent 层去查 HTTP 是把依赖倒过来了。
+ * 这个值全应用只有一份，用一个模块级的设置函数最省事。
+ */
+export function setSplitMaxChars(n: number): void {
+  splitMaxChars = Math.max(20, Math.min(400, Math.round(n)))
+}
+
+export function getSplitMaxChars(): number {
+  return splitMaxChars
+}
 
 export function createSentenceSplitter() {
   let pending = ''
@@ -132,7 +153,7 @@ export function createSentenceSplitter() {
      */
     push(chunk: string): string[] {
       pending += chunk
-      if (pending.length < SPLIT_MAX_CHARS) return []
+      if (pending.length < splitMaxChars) return []
 
       /*
        * 到上界了，切一刀。
