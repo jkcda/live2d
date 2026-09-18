@@ -332,11 +332,22 @@ export async function buildAgent(opts: BuildAgentOptions) {
     .join('\n')
 
   const mcpTools = getMcpTools()
-  if (mcpTools.length) console.log(`[agent] MCP 工具 ${mcpTools.length} 个`)
+  const builtinTools = createTools(opts.ctx)
+
+  /*
+   * 打一下 system prompt 的字数和工具数。
+   *
+   * 这两个数决定每次请求的 prefill 有多大。**26 个 Playwright MCP 工具的 schema
+   * 是实打实塞进请求里的**，可能比整个 system prompt 还长 ——
+   * 「模型首 token 慢」如果是因为这个，改 prompt 没用，得从工具集下手。
+   */
+  console.log(
+    `[agent] system ${systemPrompt.length} 字｜内置工具 ${builtinTools.length} 个｜MCP ${mcpTools.length} 个`,
+  )
 
   return createAgent({
     model: createModel(opts.llm),
-    tools: [...createTools(opts.ctx), ...mcpTools] as never,
+    tools: [...builtinTools, ...mcpTools] as never,
     systemPrompt,
   })
 }

@@ -85,15 +85,32 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   const history = Array.isArray(body.messages) ? body.messages : []
 
   /*
+   * 计时。
+   *
+   * 用户报「文字回复慢得要命」，而这条链路上能拖时间的地方有四处，
+   * 光看界面分不出来是哪一处：
+   *   ① 请求体多大（带图的话 base64 就有几百 KB）
+   *   ② compactHistory（它会调一次 LLM 做摘要 —— 每次请求开头都 await 它）
+   *   ③ 模型首 token（外部 API，还有 system prompt / 工具 schema 的 prefill）
+   *   ④ 事件在路上的转发
+   * 打出来才能知道该修哪个，不然就是瞎猜。
+   */
+  const t0 = Date.now()
+  const screenChars = typeof body.screen?.dataUrl === 'string' ? body.screen.dataUrl.length : 0
+
+  /*
    * 长对话先压缩再喂给模型。
    * 放在这里（每次请求的开头）而不是"聊完再压"：聊完那一刻用户已经在等下一句了，
    * 而这里本来就要等模型，压缩的那点延迟是**重叠**掉的。
    */
   let messages = history
+  let compactMs = 0
   try {
     messages = await compactHistory(history, sessionId, llm)
   } catch (err) {
     console.warn('[chat] 压缩失败，用原历史：', err instanceof Error ? err.message : err)
+  } finally {
+    compactMs = Date.now() - t0
   }
 
   res.writeHead(200, {
@@ -118,6 +135,10 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
   }
   let assistantText = ''
 
+  let firstEventMs = 0
+  let firstContentMs = 0
+  let eventCount = 0
+
   try {
     let connected = false
     for await (const event of runAgent(messages, input, {
@@ -127,18 +148,32 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
       signal: abort.signal,
     })) {
       if (abort.signal.aborted) break
+      eventCount++
+      if (!firstEventMs) firstEventMs = Date.now() - t0
+      if (event.type === 'content') {
+        if (!firstContentMs) firstContentMs = Date.now() - t0
+        assistantText += event.content
+      }
       if (!connected) {
         connected = true
         // 先发一条注释行让前端知道"接上了"（否则首字延迟里界面是死的，没法区分"在想"和"没连上"）
         res.write(': connected\n\n')
       }
-      if (event.type === 'content') assistantText += event.content
       send(event)
     }
   } catch (err) {
     send({ type: 'error', error: err instanceof Error ? err.message : String(err) })
   } finally {
     res.end()
+    /*
+     * 一轮的耗时拆解。用户等的是「首正文」那一列 ——
+     * 它减去 compactMs 就是模型自己花的时间（含 system prompt + 工具 schema 的 prefill）。
+     */
+    console.log(
+      `[chat] 入 ${input.length} 字｜历史 ${history.length} 条｜图 ${(screenChars / 1024).toFixed(0)}KB` +
+        `｜压缩 ${compactMs}ms｜首事件 ${firstEventMs}ms｜首正文 ${firstContentMs}ms` +
+        `｜事件 ${eventCount} 个｜总计 ${Date.now() - t0}ms`,
+    )
   }
 
   /*
