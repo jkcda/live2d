@@ -9,7 +9,7 @@
  * 这里只负责调用和排队。服务没起来时静默降级为「只显示文字，不出声」。
  */
 import type { AudioPlayer } from './player'
-import { setSplitMaxChars } from '../agent/llm'
+import { getSplitMaxChars, setSplitMaxChars } from '../agent/llm'
 
 export interface TTSConfig {
   /** Python 推理服务地址，例如 http://127.0.0.1:8765 */
@@ -78,6 +78,17 @@ export class VoiceOutput {
     const gen = this.generation
     const controller = this.ensureController()
     this.pending++
+
+    /*
+     * 每句都过这里，所以探引擎挂在这儿 —— 见 ensureEngineProbe 的注释。
+     *
+     * 为什么不挂在 interrupt()：那个不是每轮都调的
+     * （session 里是 `if (this.controller) this.interrupt()`，第一句不调），
+     * 挂在它上面会让「应用启动后第一次说话」用错切分粒度。
+     *
+     * 内部有 10 秒缓存，所以不是每句都发请求。
+     */
+    void this.ensureEngineProbe()
 
     /*
      * 短句整句、长句流式（见 STREAM_MIN_CHARS）。
@@ -170,25 +181,28 @@ export class VoiceOutput {
   }
 
   /**
-   * 探一次服务端用的是哪个引擎，按它的速度调整切分粒度。
+   * 需要时探一次引擎（带缓存，避免每句都发请求）。
    *
-   * ★ 为什么切分粒度要跟着引擎走
+   * ★ 为什么不能只在启动时探一次
    *
-   * 实测（同一台机器）：
+   * 引擎是靠**环境变量 + 重启服务**切换的，应用这边收不到任何通知 ——
+   * 启动时是云端就按云端配（整段），你切回本地它也不知道，还是整段，
+   * 于是停顿又落回句子中间。
    *
-   *     云端 siliconflow   RTF 0.14              几乎不随长度恶化
-   *     本地 cosyvoice     RTF 1.00~1.86（10→20 字）  随长度明显恶化
+   * 实测踩过：用户改 env 重启服务切回本地，应用没重启，切分粒度还是云端的那个。
    *
-   * RTF > 1 意味着合成比播放慢，播放迟早追上合成、**中间必须停一下**。
-   * 而那个「停」落在哪里决定你听到什么：
-   *
-   *   · 停在句号处 → 像换气，自然
-   *   · 停在句子中间 → 「快说出来了突然停一下」，明显是卡
-   *
-   * 所以：**快的引擎整段合成（语气连贯），慢的引擎切短（让停顿落在句号处）。**
-   *
-   * 探不到就保持默认（整段）—— 云端是更好的默认值。
+   * 所以**每轮对话开始时重探一次**（10 秒缓存）。探不到就保持现值 ——
+   * 服务没起来不该让切分粒度被重置。
    */
+  private probedAt = 0
+
+  async ensureEngineProbe(): Promise<void> {
+    if (Date.now() - this.probedAt < 10_000) return
+    this.probedAt = Date.now()
+    await this.probeEngine()
+  }
+
+  /** 探一次服务端用的是哪个引擎，按它的速度调整切分粒度。 */
   async probeEngine(): Promise<string> {
     const cfg = this.getConfig()
     if (!cfg.baseURL) return ''
@@ -206,10 +220,18 @@ export class VoiceOutput {
       // cosyvoice-remote = 转发到本机那个模型（跑在同一块显卡上，RTF > 1）
       // openai / edge = 线上，快
       const slow = name.startsWith('cosyvoice')
-      setSplitMaxChars(slow ? 24 : 150)
+      const next = slow ? 24 : 150
+
+      // 变了才打日志 —— 排查「为什么还是断」时这一行是关键
+      if (next !== getSplitMaxChars()) {
+        console.log(
+          `[tts] 引擎 ${name} → 每段最多 ${next} 字（${slow ? '本地，切短让停顿落在句号处' : '线上，整段合成'}）`,
+        )
+      }
+      setSplitMaxChars(next)
       return name
     } catch {
-      // 服务没起来：不改，保持默认
+      // 服务没起来：不改，保持现值
       return ''
     }
   }
