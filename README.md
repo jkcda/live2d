@@ -85,6 +85,8 @@ TTS 音频块 → AudioContext AnalyserNode → RMS 振幅 → 指数平滑 → 
 
 ```
 live2d/
+├── docker-compose.yml           # 后端两个服务的编排（前端是桌面应用，不进容器）
+├── .env.example                 # compose 读的环境变量模板（.env 已 gitignore）
 ├── electron/
 │   ├── main.ts                  # 窗口：透明/置顶/点击穿透/全局快捷键
 │   └── preload.ts               # 暴露给渲染进程的桥接口
@@ -99,7 +101,8 @@ live2d/
 │   │   │   ├── session.ts       # 历史 + 切句 + 打断；优先走 agent 服务，不行退回直连
 │   │   │   ├── agentClient.ts   # agent 服务（8766）的 SSE 客户端
 │   │   │   ├── llm.ts           # 直连 OpenAI 兼容接口（降级路径）+ 按标点切句
-│   │   │   └── persona.ts       # 人设提示词
+│   │   │   ├── persona.ts       # 人设提示词（含语气标记的说明）
+│   │   │   └── emotion.ts       # 语气标记 → 给人看的字（[laughter] → （笑））
 │   │   ├── character/           # 角色：角色包 / 能力探测 / 两个渲染器的共同接口
 │   │   │   ├── types.ts         # CharacterStage / CharacterFrame：两个渲染器的共同接口
 │   │   │   ├── packs.ts         # 角色包：清单、素材探测、能力表、按角色调参
@@ -345,12 +348,61 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 
 ---
 
+## Docker
+
+三个后端服务里的**两个**可以容器化（`service` 8765 / `agent` 8766）。
+
+**前端（Electron 桌宠窗口）不在容器里**，也不该在 —— 它要访问托盘、全局快捷键、
+屏幕截图、窗口穿透，这些容器给不了。所以：**容器跑后端，前端在宿主机跑**。
+
+```bash
+cp .env.example .env      # 填 LLM 的 key（.env 已被 gitignore）
+docker compose up -d
+pnpm dev                  # 前端照常起，连的就是容器里那两个
+```
+
+### 为什么镜像里没有 CosyVoice 模型
+
+| 原因 | 说明 |
+|---|---|
+| 体积 | 权重约 4GB，而且受各自许可约束，不该塞进镜像 |
+| GPU | Windows 上要先装 WSL2 + nvidia-container-toolkit |
+| 定位 | 本地模型那条路本来就是「我自己机器上的音色」，不是给别人跑的 |
+
+**所以容器里跑的是线上 TTS**（`edge` 免费不用 key，或 `openai` 那类）——
+纯 CPU、有网就能跑。**要本地音色就在宿主机跑 `tools\start-all.cmd`。**
+
+### 两个必须知道的坑
+
+**① 容器里 `NEXUS_HOST` 必须是 `0.0.0.0`**
+
+代码里的默认值是 `127.0.0.1`（那是给宿主机直跑用的）。容器里绑 `127.0.0.1` 的话，
+端口映射进来的流量会被拒 —— **表现是「前端连不上服务」，很容易往错的方向查**。
+compose 里已经设好了。
+
+**② agent 的 `data/` 必须挂出来**
+
+记忆 / 转录 / 摘要都落在那里。不挂卷的话**容器一删，她就把你忘了**。
+compose 里用的是命名卷 `nexus-agent-data`。
+
+### 受许可约束的素材都不进镜像
+
+Live2D 模型、Cubism Core、角色立绘、音色素材 —— 全在 `.dockerignore` 里排除了，
+运行时按需挂载。见各自的 `README` 说明。
+
+---
+
 ## 快捷键
 
 | 快捷键 | 作用 |
 |---|---|
+| `Ctrl/Cmd + Shift + V` | **按一次开始录音，再按一次结束** —— 窗口不用显示，说完她直接出声回答 |
 | `Ctrl/Cmd + Shift + H` | 显示 / 隐藏角色 |
 | `Ctrl/Cmd + Shift + Q` | 退出 |
+
+`Ctrl+Shift+V` 这条路**窗口不需要弹出来**：麦克风采集在渲染进程里跑，
+而主进程关掉了 `backgroundThrottling`，所以窗口隐藏时它照样在采。
+**不弹窗是有意的** —— 弹窗会把前台窗口抢走，而她看屏幕靠的就是前台窗口。
 
 ---
 
@@ -371,7 +423,7 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 - [x] VAD（`WS /stream` 通道 + 零依赖能量法，实测打断延迟 ~96ms）
 - [x] 语音输入闭环（麦克风采集 → VAD → 打断 → ASR → 送 LLM）
 - [x] Windows SAPI 过渡引擎（真语音，不用等 CosyVoice 装好）
-- [ ] 切到 CosyVoice 2 真实 TTS
+- [x] 切到 CosyVoice 2 真实 TTS
 - [x] 启用 SenseVoice ASR（`NEXUS_ASR_ENGINE=sensevoice`）
 - [x] 角色包 + 热插拔（多角色并存，切换角色不刷新页面）
 - [x] 立绘（PNGTuber）渲染器：只有立绘也能用自己的角色（嘴 1~2 档 + 眨眼 + 瞳仁跟随）
@@ -382,7 +434,17 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
       + 持久记忆（自动提取 + `remember` 工具）+ 渐进式历史压缩
 - [x] agent → 界面的 `command` 通道：她说话时的情绪**真的会落到脸上**（`show_expression`）
 - [x] 在线语音引擎（`edge`，真人级音色、零模型下载）；CosyVoice 2 音色克隆进行中
-- [ ] CosyVoice 2 本地克隆音色（装依赖 + 下权重中）
+- [x] CosyVoice 2 本地克隆音色（声纹预注册 + 流式，实测 RTF 0.82~1.2）
+- [x] **线上 TTS 通路**（任何 OpenAI 兼容的 `/v1/audio/speech`）——
+      本地 / 线上一个开关切换，`tools\start-api.cmd` 一键起
+- [x] **音色克隆到线上**（`tools/clone-voice.py`）—— 用本地那份参考音频换一个云端 voice uri，
+      于是切云端不损失音色
+- [x] **语气标记**（`[laughter]` / `[sigh]` / `[breath]`）：
+      合成引擎认这些标记，文字里显示成「（笑）」，声音里真的会笑
+- [x] **录音手动停**：静音不再自动收尾 —— 「我说完了」只有你自己知道
+- [x] 长期记忆（jsonl 转录 + 摘要 + 遗忘）
+- [x] 看屏幕（视觉，含黑名单 / 暂停开关 / 多显示器 fail-closed）
+- [x] Docker（`docker-compose.yml`，后端两个服务；前端是桌面应用不进容器）
 
 > **现在就能验证的完整链路**：起 `python -m service.main`（默认 tone 引擎，不需要 GPU 和模型），
 > 再起 `pnpm dev:web`，填个 API key，打开麦克风 —— 说话时她会立刻闭嘴（barge-in），
@@ -398,5 +460,5 @@ Cubism 官方提供一批免费示例模型：<https://www.live2d.com/en/learn/s
 
 ## 后续阶段
 
-- **二阶段**：记忆系统（jsonl 转录 + md 提炼 + 向量索引）、身份文件、MCP 工具调用
+- **二阶段**：记忆系统（jsonl 转录 + md 提炼 + 向量索引）✅ 已完成、身份文件 ✅、MCP 工具调用 ✅
 - **三阶段**：视频生成动作资产、实时数字人特写、插件系统

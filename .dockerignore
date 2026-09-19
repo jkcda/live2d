@@ -1,0 +1,50 @@
+# 构建上下文里要排除的东西。
+#
+# 目的有两个：**镜像小** + **密钥不进镜像**。
+# 第二个比第一个重要 —— 镜像层是可以被翻出来的（`docker history`、
+# 或者推到 registry 之后），所以 .env 之类的绝不能进去。
+
+# ── 依赖与产物：容器里会重新装 ──
+node_modules/
+**/node_modules/
+dist/
+dist-electron/
+release/
+vendor/
+
+# ── 密钥：绝不能进镜像 ──
+.env
+.env.*
+*.env
+!*.env.example
+tools/tts-api.env
+**/.env
+
+# ── 本地数据与日志 ──
+logs/
+*.log
+agent/data/
+.pids.json
+.dsh-uploads/
+
+# ── 受许可约束的素材：不进镜像，运行时挂载 ──
+# Live2D 模型、Cubism Core、角色立绘、音色素材
+public/models/
+public/lib/
+public/portrait/
+python/voices/
+!python/voices/README.md
+
+# ── 编辑器 / 系统 ──
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── 文档（运行时用不到）──
+docs/
+*.md
+!python/voices/README.md
+!agent/README.md

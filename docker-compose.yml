@@ -1,0 +1,71 @@
+# 三个后端服务的容器编排。
+#
+# ★ 前端（Electron 桌宠窗口）**不在容器里** —— 它是桌面应用，
+#   要访问托盘、全局快捷键、屏幕截图、窗口穿透，这些容器给不了。
+#   所以：容器跑后端，前端在宿主机跑（`pnpm dev`）。
+#
+# 用法：
+#   cp .env.example .env          # 填 LLM 的 key
+#   docker compose up -d
+#   pnpm dev                      # 前端照常起
+#
+# 默认走**线上 TTS**（edge，免费、不用 key）。本地 CosyVoice 模型不在镜像里，
+# 原因见 python/Dockerfile 顶部 —— 要本地音色就在宿主机跑 tools\start-all.cmd。
+
+services:
+  # ── 主推理服务：TTS / ASR / VAD ──
+  service:
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+    container_name: nexus-service
+    ports:
+      - "8765:8765"
+    environment:
+      # ★ 容器里必须监听 0.0.0.0。
+      #   代码里的默认值是 127.0.0.1 —— 那是给宿主机直跑用的，
+      #   在容器里绑 127.0.0.1 的话，端口映射进来的流量会被拒（看起来像"连不上服务"）。
+      NEXUS_HOST: 0.0.0.0
+      NEXUS_PORT: "8765"
+
+      # TTS 引擎。edge = 微软 Edge 朗读（免费、不要 key、要联网）
+      # 换成 openai 就在下面填 key，见 .env.example
+      NEXUS_TTS_ENGINE: ${NEXUS_TTS_ENGINE:-edge}
+      NEXUS_TTS_API_URL: ${NEXUS_TTS_API_URL:-}
+      NEXUS_TTS_API_KEY: ${NEXUS_TTS_API_KEY:-}
+      NEXUS_TTS_API_MODEL: ${NEXUS_TTS_API_MODEL:-}
+      NEXUS_TTS_API_VOICE: ${NEXUS_TTS_API_VOICE:-}
+
+      # 语音识别默认关掉（容器里没装 funasr，装它要拉 1GB+ 的模型）
+      NEXUS_ASR_ENGINE: ${NEXUS_ASR_ENGINE:-none}
+    volumes:
+      # 音色素材是**你自己的**，构建时不进镜像，运行时挂进来
+      # （本地 CosyVoice 的音色注册文件在这里；线上模式用不到，挂了也无害）
+      - ./python/voices:/app/python/voices:ro
+    restart: unless-stopped
+
+  # ── agent：LLM 编排 / 工具 / MCP / 记忆 ──
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: nexus-agent
+    ports:
+      - "8766:8766"
+    environment:
+      AGENT_PORT: "8766"
+      # LLM 配置。前端会把设置面板里那套随请求发过来，
+      # 这里填的是"服务自己单独跑"时的默认值 —— 填了更稳。
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      # 联网搜索：不填就退回 DuckDuckGo 抓 HTML
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+    volumes:
+      # ★ 记忆 / 转录 / 摘要都在这里，**必须持久化** ——
+      #   不挂的话容器一删，她就把你忘了。
+      - nexus-agent-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  nexus-agent-data:
