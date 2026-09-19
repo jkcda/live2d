@@ -4,8 +4,11 @@
 
 FROM node:22-slim
 
-# pnpm 用 corepack 拿，版本跟仓库里的 lock 走
-RUN corepack enable
+# ★ 显式锁 pnpm 版本。
+#   agent/package.json 里没有 `packageManager` 字段，corepack 会拿它自己的默认版本 ——
+#   而 pnpm 各版本写出的 lockfile 格式不完全兼容，`--frozen-lockfile` 可能直接失败。
+#   锁住比赌它一致要省事。版本取本机那个（10.33.0）—— lockfile 就是它写的。
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 WORKDIR /app
 

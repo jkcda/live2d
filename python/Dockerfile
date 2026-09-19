@@ -27,6 +27,11 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY python/ ./python/
 
+# ★ 工作目录必须切到 python/ —— 启动命令是 `python -m service.main`，
+#   而模块在 /app/python/service/。停在 /app 的话直接 `No module named service`。
+#   （本地 tools\start-all.ps1 也是用 -WorkDir python 起的，同一个道理。）
+WORKDIR /app/python
+
 # 音色素材是**用户自己的**，构建时不带进来，运行时挂载（见 compose 的 volumes）
 ENV NEXUS_VOICES_DIR=/app/python/voices \
     PYTHONIOENCODING=utf-8 \
@@ -36,7 +41,9 @@ ENV NEXUS_VOICES_DIR=/app/python/voices \
 
 EXPOSE 8765
 
-# 用 127.0.0.1 探活会失败（容器里服务监听 0.0.0.0），所以探 0.0.0.0
+# 探活走 127.0.0.1 —— 这是**容器内部**自己探自己，服务监听 0.0.0.0 已经包含它了。
+# （容易搞混的是另一件事：服务**必须**监听 0.0.0.0，否则宿主机端口映射进来的流量会被拒。
+#   那是监听地址的问题，不是探活地址的问题。）
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8765/health',timeout=4)"
 
