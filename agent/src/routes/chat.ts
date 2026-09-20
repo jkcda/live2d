@@ -45,6 +45,13 @@ interface ChatBody {
   activity?: ActivitySnapshot | null
   /** 这一轮附上的屏幕截图（同样已在主进程过完黑名单 + 暂停开关） */
   screen?: ScreenAttachment | null
+  /**
+   * 用户这一轮**主动挑给她看**的图（跟截屏是两回事，可以同时有）。
+   *
+   * 为什么单开一个字段而不是复用 screen：措辞不同。截屏是"她自己看到的"，
+   * 这张是"他递过来的" —— 说反了她会答非所问。
+   */
+  image?: ScreenAttachment | null
 }
 
 /**
@@ -152,6 +159,7 @@ chatRouter.post('/chat', async (req: Request, res: Response) => {
     commands: [],
     activity: body.activity ?? null,
     screen: sanitizeScreen(body.screen),
+    image: sanitizeScreen(body.image),
   }
   let assistantText = ''
 

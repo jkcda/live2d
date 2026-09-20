@@ -138,6 +138,12 @@ const micOn = ref(false)
 const voiceStatus = ref<VoiceInputStatus>('idle')
 const hearing = ref(false)
 const recognizing = ref(false)
+/**
+ * 挑好、还没发出去的那张图。
+ *
+ * **一次性的** —— 发完就清空。粘着不放的话，下一轮她会莫名其妙又收到同一张图。
+ */
+const pendingImage = ref<(ScreenForTurn & { name: string }) | null>(null)
 
 const name = DEFAULT_PERSONA.name
 
@@ -262,7 +268,9 @@ async function sendText(text: string) {
   }
 
   error.value = ''
-  await sendTurn(trimmed)
+  const img = pendingImage.value
+  pendingImage.value = null // 图是**一次性的**：发完就清，不会粘在下一轮
+  await sendTurn(trimmed, img)
 }
 
 /**
@@ -324,6 +332,35 @@ function onTurn(e: TurnEvent) {
   } else if (ev.type === 'error') {
     error.value = ev.message
     bubbles.value[replyIndex].failed = true
+  }
+}
+
+/**
+ * 挑一张图给她看。
+ *
+ * 转换（读取 → 缩放 → 编码 base64）全在**主进程**做 —— 渲染层拿不到任意路径，
+ * 而且转换只该有一处。这里拿到的就是一个能直接塞进 image_url 的 data URL。
+ *
+ * 浏览器版没有 `window.nexus`（那是 Electron 的桥），按钮点了没反应 ——
+ * 所以下面会判空并给一句提示，而不是静默失败。
+ */
+async function pickImageForTurn() {
+  if (pendingImage.value) {
+    pendingImage.value = null // 再点一次 = 取消
+    return
+  }
+  if (!window.nexus?.pickImage) {
+    error.value = '浏览器版看不了本地图片（要 Electron 的桥）。用桌面版。'
+    return
+  }
+  error.value = ''
+  try {
+    const picked = await window.nexus.pickImage()
+    if (!picked) return // 用户取消了
+    // 补一个 ageSeconds —— 下游按"刚给她的图"处理（见 agent 的 userContent）
+    pendingImage.value = { ...picked, ageSeconds: 0 }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
   }
 }
 
@@ -424,14 +461,35 @@ function onKeydown(e: KeyboardEvent) {
         </svg>
       </button>
 
-      <textarea
-        ref="inputEl"
-        v-model="input"
-        class="input"
-        rows="1"
-        placeholder="和她说点什么…"
-        @keydown="onKeydown"
-      />
+      <button
+        class="pic"
+        :class="{ on: !!pendingImage }"
+        :title="pendingImage ? '换一张 / 取消' : '给她看一张图'"
+        @click="pickImageForTurn"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <circle cx="8.5" cy="9.5" r="1.5" />
+          <path d="M4 17l5-5 4 4 3-3 4 4" />
+        </svg>
+      </button>
+
+      <div class="field">
+        <!-- 挑好的图先给她看一遍预览，免得发出去才发现挑错了 -->
+        <div v-if="pendingImage" class="pic-preview">
+          <img :src="pendingImage.dataUrl" :alt="pendingImage.name" />
+          <span class="pic-name">{{ pendingImage.name }}</span>
+          <button class="pic-clear" title="取消" @click="pendingImage = null">×</button>
+        </div>
+        <textarea
+          ref="inputEl"
+          v-model="input"
+          class="input"
+          rows="1"
+          placeholder="和她说点什么…"
+          @keydown="onKeydown"
+        />
+      </div>
 
       <button v-if="busy" class="send stop" @click="stop">打断</button>
       <button v-else class="send" :disabled="!input.trim()" @click="send">发送</button>
@@ -440,6 +498,67 @@ function onKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
+.pic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.62;
+  cursor: pointer;
+}
+.pic:hover { opacity: 1; }
+.pic.on { opacity: 1; color: #4a9eff; }
+
+.field {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pic-preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.12);
+  font-size: 11px;
+}
+.pic-preview img {
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.pic-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+.pic-clear {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 3px;
+}
+.pic-clear:hover { opacity: 1; }
+
 .panel {
   display: flex;
   flex-direction: column;

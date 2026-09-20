@@ -220,7 +220,13 @@ export class ChatSession {
    * 调用方直接 `for await` 消费即可；口型/字幕/音频由 hooks 驱动，
    * 不需要在消费侧再解析一遍文本。
    */
-  async *send(userText: string): AsyncGenerator<AgentEvent> {
+  /**
+   * 发一轮。
+   *
+   * `opts.image` 是**用户主动挑给她看**的图（不是截屏 —— 那个在 stream() 里自己取）。
+   * 它跟截屏可以同时存在，两条路互不冲突。
+   */
+  async *send(userText: string, opts?: { image?: ScreenForTurn | null }): AsyncGenerator<AgentEvent> {
     const text = userText.trim()
     if (!text) return
     if (this.controller) this.interrupt()
@@ -235,7 +241,7 @@ export class ChatSession {
     let errored = false
 
     try {
-      for await (const ev of this.stream(text, controller.signal)) {
+      for await (const ev of this.stream(text, controller.signal, opts?.image ?? null)) {
         if (ev.type === 'delta') {
           assistant += ev.content
           this.hooks.onDelta?.(ev.content)
@@ -291,7 +297,11 @@ export class ChatSession {
    * 服务刚挂掉那 30 秒内不再重试（见 agentClient 的 markAgentDown）：
    * 否则每一句话都要先等一次连接超时，那才是真的卡。
    */
-  private async *stream(text: string, signal: AbortSignal): AsyncGenerator<AgentEvent> {
+  private async *stream(
+    text: string,
+    signal: AbortSignal,
+    image: ScreenForTurn | null,
+  ): AsyncGenerator<AgentEvent> {
     const agentCfg = this.agent
     if (agentCfg?.enabled && agentLikelyUp()) {
       try {
@@ -312,6 +322,7 @@ export class ChatSession {
           sessionId: agentCfg.sessionId,
           activity,
           screen,
+          image,
           signal,
         })) {
           yield ev

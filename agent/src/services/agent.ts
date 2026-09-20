@@ -61,6 +61,12 @@ export interface ScreenAttachment {
   height: number
   /** 这张图是几秒前抓的。她得知道这是「刚才」而不是「此刻」 */
   ageSeconds: number
+  /**
+   * 文件名。**只有用户主动挑的图才有** —— 截屏没有名字。
+   *
+   * 给她一个称呼这张图的方式，同时**不带目录**（不该把用户的目录结构漏进请求）。
+   */
+  name?: string
 }
 
 export interface AgentContext {
@@ -69,6 +75,8 @@ export interface AgentContext {
   activity: ActivitySnapshot | null
   /** 这一轮附上的屏幕截图；没有就是 null（暂停 / 黑名单 / 画面没变） */
   screen: ScreenAttachment | null
+  /** 用户这一轮主动挑给她看的图（跟截屏互不冲突，可以同时有） */
+  image: ScreenAttachment | null
 }
 
 // ── 工具结果缓存（只缓存又慢又稳定的） ──
@@ -338,7 +346,7 @@ function createTools(ctx: AgentContext) {
  * 而且表现是「设置面板里少一个」，不报错、很难发现。
  */
 export function builtinToolNames(): string[] {
-  const stub: AgentContext = { commands: [], activity: null, screen: null }
+  const stub: AgentContext = { commands: [], activity: null, screen: null, image: null }
   return createTools(stub)
     .map((t) => (t as { name?: string }).name)
     .filter((n): n is string => Boolean(n))
@@ -464,13 +472,34 @@ export type ContentBlock =
  * 顺带把「这张图是几秒前的」写进文字里 —— 不写的话她会把一张十几秒前的画面
  * 当成此刻，说出"你现在正在…"这种错的判断。
  */
-function userContent(screen: ScreenAttachment | null, text: string): string | ContentBlock[] {
-  if (!screen) return text
-  const when = screen.ageSeconds <= 2 ? '刚刚抓的' : `${screen.ageSeconds} 秒前抓的`
-  return [
-    { type: 'text', text: `${text}\n\n（附一张他屏幕的截图，${when}，内容是他前台窗口那一块）` },
-    { type: 'image_url', image_url: { url: screen.dataUrl } },
-  ]
+function userContent(
+  screen: ScreenAttachment | null,
+  image: ScreenAttachment | null,
+  text: string,
+): string | ContentBlock[] {
+  if (!screen && !image) return text
+
+  /*
+   * ★ 两种图的**措辞必须分开**。
+   *
+   * 截屏是「她自己看到的」（他可能不知道她看了），用户挑的图是
+   * 「他主动给她看的」—— 说反了她会答非所问（比如对着一张主动递过来的图
+   * 说"我看到你现在在用 XX 软件"，那是截屏的语域）。
+   */
+  const notes: string[] = []
+  const blocks: ContentBlock[] = []
+
+  if (screen) {
+    const when = screen.ageSeconds <= 2 ? '刚刚抓的' : `${screen.ageSeconds} 秒前抓的`
+    notes.push(`（附一张他屏幕的截图，${when}，内容是他前台窗口那一块）`)
+    blocks.push({ type: 'image_url', image_url: { url: screen.dataUrl } })
+  }
+  if (image) {
+    notes.push(`（附一张他主动给你看的图${image.name ? `，文件名 ${image.name}` : ''}）`)
+    blocks.push({ type: 'image_url', image_url: { url: image.dataUrl } })
+  }
+
+  return [{ type: 'text', text: `${text}\n\n${notes.join('\n')}` }, ...blocks]
 }
 
 /**
@@ -507,7 +536,7 @@ export async function* runAgent(
       {
         messages: [
           ...messages.map((m) => ({ role: m.role, content: m.content })),
-          { role: 'user' as const, content: userContent(opts.ctx.screen, userInput) },
+          { role: 'user' as const, content: userContent(opts.ctx.screen, opts.ctx.image, userInput) },
         ],
       },
       { version: 'v2', recursionLimit: 60 },

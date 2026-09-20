@@ -44,6 +44,8 @@ export interface AgentStreamOptions {
    * 拿不到就是 null：她照样能聊，只是少一张图。
    */
   screen?: ScreenForTurn | null
+  /** 用户主动挑给她看的图。跟 screen 可以同时有 —— 两条路互不冲突 */
+  image?: ScreenForTurn | null
   signal?: AbortSignal
 }
 
@@ -77,6 +79,7 @@ export async function* streamAgent(opts: AgentStreamOptions): AsyncGenerator<Age
       sessionId: opts.sessionId,
       activity: opts.activity ?? null,
       screen: opts.screen ?? null,
+      image: opts.image ?? null,
     }),
     signal: opts.signal,
   })

@@ -64,6 +64,16 @@ contextBridge.exposeInMainWorld('nexus', {
    * 订阅「托盘菜单要求打开某个面板」。
    * 返回取消订阅函数 —— 组件卸载时不注销会在热更新后重复触发。
    */
+  /**
+   * 弹系统对话框挑一张图，返回 data URL（已缩放 + 编码）。
+   *
+   * 转换在主进程做 —— 渲染层拿不到任意路径，而且转换只该有一处。
+   */
+  pickImage: () => ipcRenderer.invoke('file:pickImage'),
+
+  /** 拖拽进来的文件：从路径读图（同样在主进程转换） */
+  imageFromPath: (filePath: string) => ipcRenderer.invoke('file:imageFromPath', filePath),
+
   onOpenPanel: (handler: (panel: 'chat' | 'settings') => void) => {
     const listener = (_e: IpcRendererEvent, panel: 'chat' | 'settings') => handler(panel)
     ipcRenderer.on('ui:open-panel', listener)

@@ -165,14 +165,14 @@ function emitTurn(e: TurnEvent): void {
  */
 let turnBusy = false
 
-export async function sendTurn(text: string): Promise<void> {
+export async function sendTurn(text: string, image?: ScreenForTurn | null): Promise<void> {
   const trimmed = text.trim()
   if (!trimmed || turnBusy) return
 
   turnBusy = true
   emitTurn({ type: 'start', text: trimmed })
   try {
-    for await (const event of chatSession.send(trimmed)) {
+    for await (const event of chatSession.send(trimmed, { image: image ?? null })) {
       emitTurn({ type: 'agent', event })
     }
   } catch (err) {

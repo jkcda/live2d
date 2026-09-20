@@ -77,6 +77,27 @@ interface NexusAPI {
   resetScreenGate: () => Promise<boolean>
 
   /** 订阅托盘菜单的「打开面板」请求。返回取消订阅函数。 */
+  /**
+   * 弹系统对话框挑一张图。返回已缩放编码的 data URL；取消返回 null。
+   * 转换在主进程做，渲染层只拿到字符串。
+   */
+  pickImage: () => Promise<{
+    dataUrl: string
+    name: string
+    width: number
+    height: number
+    originalBytes: number
+  } | null>
+
+  /** 拖拽进来的文件（渲染层从 drop 拿到路径后交给主进程读） */
+  imageFromPath: (filePath: string) => Promise<{
+    dataUrl: string
+    name: string
+    width: number
+    height: number
+    originalBytes: number
+  } | null>
+
   onOpenPanel: (handler: (panel: 'chat' | 'settings') => void) => () => void
 
   /**
@@ -115,6 +136,8 @@ interface ScreenForTurn {
   height: number
   /** 这张图是几秒前抓的 —— 她得知道这是「刚才」而不是「此刻」 */
   ageSeconds: number
+  /** 文件名。只有用户主动挑的图才有；截屏没有名字，也不该带目录 */
+  name?: string
 }
 
 interface Window {

@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { isSupported as nativeStyleSupported, setNoActivate } from './win-style.js'
 import { ActivityObserver, activitySnapshot, foregroundWindow, isObservable } from './observer.js'
 import { captureForeground, captureRect, ScreenGate, type ScreenFrame } from './screen.js'
+import { imageToDataUrl, pickImage } from './files.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -529,6 +530,37 @@ ipcMain.handle('observe:status', () => ({
  *
  * 所以这里只管「变化门控」这一道（它是对已抓到的图做判断，没有窗口期问题）。
  */
+/*
+ * 本地图片 → data URL。
+ *
+ * ★ 为什么在主进程做转换，而不是渲染层
+ *
+ * 主进程本来就能读磁盘（截屏那条路就是它干的），而渲染层拿不到任意路径。
+ * 更重要的是：**转换只该有一处**。渲染层只收到一个 dataUrl 字符串，
+ * 不关心背后是截屏还是本地图片 —— 两条路在它看来完全一样。
+ *
+ * 尺寸/质量的取舍写在 electron/files.ts 顶部。
+ */
+ipcMain.handle('file:pickImage', async () => {
+  try {
+    return await pickImage(win)
+  } catch (err) {
+    console.error('[files] 选图失败', err)
+    return null
+  }
+})
+
+/** 拖拽进来的文件走这条（渲染层从 drop 事件里拿到路径） */
+ipcMain.handle('file:imageFromPath', async (_e, filePath: unknown) => {
+  if (typeof filePath !== 'string' || !filePath) return null
+  try {
+    return await imageToDataUrl(filePath)
+  } catch (err) {
+    console.error('[files] 读图失败', err)
+    return null
+  }
+})
+
 ipcMain.handle('screen:capture', async (_e, force = false) => {
   /*
    * 「暂停观察」必须同时断掉截图。
