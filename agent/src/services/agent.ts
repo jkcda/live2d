@@ -22,6 +22,7 @@ import { createModel } from './llm.js'
 import { loadMemory, rememberEntry } from './memory.js'
 import { getMcpTools } from './mcp.js'
 import { searchWeb } from './search.js'
+import { FileAccessError, listDir, readTextFile, writeNewFile, workspaceStatus } from './files.js'
 
 /** 一次请求里，工具想要界面做的事（见 show_expression） */
 export interface AgentCommand {
@@ -240,6 +241,83 @@ function createTools(ctx: AgentContext) {
       },
     ),
   )
+
+  /*
+   * 文件读写 —— **只在设了工作区时才注册**。
+   *
+   * 没设就不注册，而不是"注册了但每次都拒绝"：模型看到不存在的工具会去问用户，
+   * 看到总报错的工具会反复试。前者体验好得多。
+   *
+   * 拒绝规则（黑名单 / 符号链接 / 不覆盖）在 services/files.ts，那里才是安全边界 ——
+   * 工具描述里写什么都不构成防护。
+   */
+  if (workspaceStatus().enabled) {
+    tools.push(
+      tool(
+        async ({ path: p }: { path: string }) => {
+          try {
+            return listDir(p)
+          } catch (err) {
+            return err instanceof FileAccessError ? err.message : `列不出来：${String(err)}`
+          }
+        },
+        {
+          name: 'list_dir',
+          description:
+            '看工作区里某个目录下有什么文件。他说"我那个文件夹里有什么""帮我看看那个目录"时用。' +
+            'path 是相对工作区的路径，根目录传 "."。',
+          schema: z.object({
+            path: z.string().describe('相对工作区的目录路径，根目录写 "."'),
+          }),
+        },
+      ),
+    )
+
+    tools.push(
+      tool(
+        async ({ path: p }: { path: string }) => {
+          try {
+            return readTextFile(p)
+          } catch (err) {
+            return err instanceof FileAccessError ? err.message : `读不了：${String(err)}`
+          }
+        },
+        {
+          name: 'read_file',
+          description:
+            '读工作区里一个文本文件的内容。他说"帮我看看那个文件""这个报错是什么"时用。' +
+            '**只对文本文件有效**（代码 / md / txt / json），图片读不了 —— 图片要走另一条路。' +
+            '单次最多读 200KB，超了会截断。',
+          schema: z.object({
+            path: z.string().describe('相对工作区的文件路径'),
+          }),
+        },
+      ),
+    )
+
+    tools.push(
+      tool(
+        async ({ path: p, content }: { path: string; content: string }) => {
+          try {
+            return writeNewFile(p, content)
+          } catch (err) {
+            return err instanceof FileAccessError ? err.message : `写不了：${String(err)}`
+          }
+        },
+        {
+          name: 'write_file',
+          description:
+            '在工作区里**新建**一个文件（写文档、笔记、代码都行）。' +
+            '★ **不能覆盖已存在的文件** —— 被拒绝了就换个文件名，不要反复试同一个。' +
+            '要改已有文件的话，先 read_file 读出来，把新内容说给他听，让他自己决定。',
+          schema: z.object({
+            path: z.string().describe('相对工作区的文件路径，含文件名'),
+            content: z.string().describe('文件内容'),
+          }),
+        },
+      ),
+    )
+  }
 
   // 闲聊占位（人家那套：闲聊也走工具，模型更稳）
   tools.push(
