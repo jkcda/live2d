@@ -445,6 +445,9 @@ Live2D 模型、Cubism Core、角色立绘、音色素材 —— 全在 `.docker
 - [x] 长期记忆（jsonl 转录 + 摘要 + 遗忘）
 - [x] 看屏幕（视觉，含黑名单 / 暂停开关 / 多显示器 fail-closed）
 - [x] Docker（`docker-compose.yml`，后端两个服务；前端是桌面应用不进容器）
+- [x] **文件读写**（`list_dir` / `read_file` / `write_file`）——
+      工作区隔离 + 凭据黑名单 + 不能覆盖已有文件；**默认关闭**，设置面板里选目录
+- [x] **给她看本地图片**（主进程读 → 缩放 1280 → data URL → 挂在消息的 `image_url` 上）
 
 > **现在就能验证的完整链路**：起 `python -m service.main`（默认 tone 引擎，不需要 GPU 和模型），
 > 再起 `pnpm dev:web`，填个 API key，打开麦克风 —— 说话时她会立刻闭嘴（barge-in），

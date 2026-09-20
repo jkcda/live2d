@@ -89,6 +89,9 @@ interface NexusAPI {
     originalBytes: number
   } | null>
 
+  /** 弹系统对话框选一个工作区目录。取消返回 null。 */
+  pickWorkspace: () => Promise<string | null>
+
   /** 拖拽进来的文件（渲染层从 drop 拿到路径后交给主进程读） */
   imageFromPath: (filePath: string) => Promise<{
     dataUrl: string

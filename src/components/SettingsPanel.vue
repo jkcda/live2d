@@ -20,6 +20,7 @@ import {
 } from '@/core/character/selection'
 import type { CharacterFeatures, CharacterPack } from '@/core/character/packs'
 import { reconfigureSession, voiceOutput } from '@/core/runtime'
+import { fetchWorkspace, updateWorkspace, type WorkspaceState } from '@/core/agent/agentClient'
 import { streamChat } from '@/core/agent/llm'
 
 const emit = defineEmits<{ close: [] }>()
@@ -119,6 +120,10 @@ function syncCharacterUI() {
  */
 
 onMounted(() => {
+  // 工作区状态从 agent 读（它是权威）。不 await —— 读不到就是"没设"，
+  // 不该因为这个把面板的其余部分拖住。
+  void loadWorkspace()
+
   const llm = loadLLMConfig()
   baseURL.value = llm.baseURL
   apiKey.value = llm.apiKey
@@ -391,6 +396,61 @@ async function addVoice() {
  */
 const agentURL = ref('')
 const memEntries = ref<string[]>([])
+const ws = ref<WorkspaceState | null>(null)
+const wsBusy = ref(false)
+const wsError = ref('')
+
+/** 读当前工作区。agent 没起来就给一句明确的提示，而不是静默留空。 */
+async function loadWorkspace() {
+  wsError.value = ''
+  const cfg = loadAgentConfig()
+  const state = await fetchWorkspace(cfg.url)
+  if (!state) {
+    wsError.value = 'agent 服务没起来，读不到工作区设置。'
+    return
+  }
+  ws.value = state
+}
+
+/** 弹系统目录选择器，选完告诉服务端（安全边界在那边） */
+async function pickWorkspaceDir() {
+  if (!window.nexus?.pickWorkspace) {
+    wsError.value = '浏览器版选不了目录（要 Electron 的桥）。用桌面版。'
+    return
+  }
+  wsError.value = ''
+  try {
+    const dir = await window.nexus.pickWorkspace()
+    if (!dir) return
+    wsBusy.value = true
+    const state = await updateWorkspace(loadAgentConfig().url, dir)
+    if (!state) {
+      wsError.value = '设置失败（agent 服务没起来？）'
+      return
+    }
+    ws.value = state
+  } catch (err) {
+    wsError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    wsBusy.value = false
+  }
+}
+
+async function clearWorkspaceDir() {
+  wsBusy.value = true
+  wsError.value = ''
+  try {
+    const state = await updateWorkspace(loadAgentConfig().url, '')
+    if (!state) {
+      wsError.value = '取消失败（agent 服务没起来？）'
+      return
+    }
+    ws.value = state
+  } finally {
+    wsBusy.value = false
+  }
+}
+
 const memBusy = ref(false)
 const memMsg = ref('')
 const memStatus = ref<{
@@ -700,6 +760,41 @@ async function forgetAll(): Promise<void> {
           <span v-if="memStatus.lastError" class="err">｜上次出错：{{ memStatus.lastError }}</span>
         </p>
       </section>
+
+      <section>
+        <h3>她能碰什么</h3>
+        <p class="note">
+          给她一个目录，她就能读里面的文本文件、往里写新文档。<b>不设就是关着的</b> ——
+          默认什么都不给，要的时候你自己划一块地方出来。
+        </p>
+
+        <p v-if="wsError" class="err">{{ wsError }}</p>
+
+        <p v-if="ws && ws.enabled" class="hint">
+          当前工作区：<code class="ws-path">{{ ws.path }}</code>
+        </p>
+        <p v-else-if="ws && ws.path" class="hint">
+          <span class="err">这个目录现在打不开（被删了？）：</span>
+          <code class="ws-path">{{ ws.path }}</code>
+        </p>
+        <p v-else class="hint">没设 —— 文件功能是关的。</p>
+
+        <div class="actions">
+          <button class="btn" :disabled="wsBusy" @click="pickWorkspaceDir">
+            {{ ws && ws.enabled ? '换一个目录' : '选一个目录' }}
+          </button>
+          <button class="btn" :disabled="wsBusy || !ws?.enabled" @click="clearWorkspaceDir">
+            关掉
+          </button>
+          <button class="btn" :disabled="wsBusy" @click="loadWorkspace">刷新</button>
+        </div>
+
+        <p class="note">
+          规则：工作区外的路径一律拒绝；<code>.env</code> / <code>id_rsa</code> /
+          <code>*.pem</code> 这类<b>即使在工作区内也拒绝</b>；
+          能新建文件，但<b>不能覆盖已存在的</b>。
+        </p>
+      </section>
     </div>
 
     <footer class="foot">
@@ -710,6 +805,12 @@ async function forgetAll(): Promise<void> {
 </template>
 
 <style scoped>
+.ws-path {
+  font-size: 11px;
+  word-break: break-all;
+  opacity: 0.85;
+}
+
 .panel {
   display: flex;
   flex-direction: column;

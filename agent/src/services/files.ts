@@ -24,7 +24,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { WORKSPACE } from '../config.js'
+import { DATA_DIR, WORKSPACE } from '../config.js'
 
 /** 单次读多少字节。超了就截断并说明 —— 整个文件塞进上下文会把请求撑爆。 */
 const MAX_READ_BYTES = 200 * 1024
@@ -66,13 +66,69 @@ const BLOCKED_SEGMENTS = [path.join('.git', 'config'), '.env']
 
 export class FileAccessError extends Error {}
 
+/**
+ * 工作区的落盘位置。
+ *
+ * 放在 agent 自己的数据目录里（`data/`，已 gitignore）而不是项目根 ——
+ * 这是**这台机器上的运行期设置**，不是要跟着仓库走的东西。
+ */
+const WORKSPACE_FILE = path.join(DATA_DIR, 'workspace.json')
+
+/*
+ * ★ 为什么不是直接读环境变量
+ *
+ * 原来是 `WORKSPACE` 常量（来自 `AGENT_WORKSPACE`）—— 那意味着改工作区要**改 env + 重启服务**，
+ * 而设置面板要能当场改。环境变量改不了。
+ *
+ * 所以：环境变量只作为**初始值**，之后由 `setWorkspace()` 改，落盘到 data/workspace.json。
+ * 优先级：落盘的值 > 环境变量 > 关闭。
+ */
+let current: string | null = null
+let loaded = false
+
+function loadOnce(): void {
+  if (loaded) return
+  loaded = true
+
+  // 落盘的值优先（用户从设置面板选的）
+  try {
+    const raw = JSON.parse(fs.readFileSync(WORKSPACE_FILE, 'utf-8')) as { path?: unknown }
+    if (typeof raw.path === 'string' && raw.path) {
+      current = raw.path
+      return
+    }
+  } catch {
+    /* 没这个文件 / 读坏了，退回环境变量 */
+  }
+  current = WORKSPACE || null
+}
+
+/**
+ * 设置工作区。传空字符串 = 关掉。
+ *
+ * ★ 这里**不校验路径存不存在** —— 存了之后目录被删掉是很正常的事，
+ *   那时候应该表现为"读不了"，而不是"设置莫名其妙丢了"。
+ *   真正的校验在 workspaceRoot() 里，每次用的时候做。
+ */
+export function setWorkspace(dir: string): void {
+  loaded = true
+  current = dir.trim() || null
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true })
+    fs.writeFileSync(WORKSPACE_FILE, JSON.stringify({ path: current }, null, 2), 'utf-8')
+  } catch (err) {
+    console.warn('[files] 工作区落盘失败（这次设置只在内存里生效）', err)
+  }
+}
+
 /** 工作区设了吗。没设的话整个文件能力是关的。 */
 export function workspaceRoot(): string | null {
-  if (!WORKSPACE) return null
+  loadOnce()
+  if (!current) return null
   try {
     // realpath 而不是 resolve —— 工作区本身也可能是个符号链接，
     // 不归一化的话后面所有前缀比较都会错。
-    const real = fs.realpathSync(WORKSPACE)
+    const real = fs.realpathSync(current)
     return fs.statSync(real).isDirectory() ? real : null
   } catch {
     return null
@@ -264,6 +320,15 @@ export function writeNewFile(input: string, content: string): string {
 export function workspaceStatus(): { enabled: boolean; root: string | null } {
   const root = workspaceRoot()
   return { enabled: root !== null, root }
+}
+
+/** 设置面板要显示的：路径 + 是不是真的可用（目录可能被删了） */
+export function workspaceDetail(): { enabled: boolean; path: string | null; error?: string } {
+  loadOnce()
+  if (!current) return { enabled: false, path: null }
+  const root = workspaceRoot()
+  if (!root) return { enabled: false, path: current, error: '这个目录现在打不开（被删了？）' }
+  return { enabled: true, path: root }
 }
 
 function formatSize(n: number): string {

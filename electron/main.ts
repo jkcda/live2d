@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { isSupported as nativeStyleSupported, setNoActivate } from './win-style.js'
 import { ActivityObserver, activitySnapshot, foregroundWindow, isObservable } from './observer.js'
 import { captureForeground, captureRect, ScreenGate, type ScreenFrame } from './screen.js'
-import { imageToDataUrl, pickImage } from './files.js'
+import { imageToDataUrl, pickDirectory, pickImage } from './files.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -541,6 +541,15 @@ ipcMain.handle('observe:status', () => ({
  *
  * 尺寸/质量的取舍写在 electron/files.ts 顶部。
  */
+ipcMain.handle('file:pickWorkspace', async () => {
+  try {
+    return await pickDirectory(win)
+  } catch (err) {
+    console.error('[files] 选目录失败', err)
+    return null
+  }
+})
+
 ipcMain.handle('file:pickImage', async () => {
   try {
     return await pickImage(win)

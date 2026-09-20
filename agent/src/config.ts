@@ -61,6 +61,9 @@ export const WEB_SEARCH = {
  *
  * 所以默认什么都不给，要的时候你自己划一块地方出来。
  * 具体的拒绝规则（黑名单 / 符号链接 / 不覆盖已有文件）见 services/files.ts。
+ *
+ * ★ 它只是**初始值**。设置面板改过的值会落盘到 data/workspace.json 并优先于它 ——
+ *   环境变量改不了运行时状态，而设置面板要能当场改。
  */
 export const WORKSPACE = (process.env.AGENT_WORKSPACE || '').trim()
 

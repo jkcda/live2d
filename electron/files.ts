@@ -117,3 +117,19 @@ export async function pickImage(win: BrowserWindow | null): Promise<PickedImage 
   if (result.canceled || !result.filePaths.length) return null
   return imageToDataUrl(result.filePaths[0])
 }
+
+/**
+ * 弹系统对话框让她挑一个**工作区目录**。
+ *
+ * 用系统的目录选择器而不是让用户手敲路径：手敲容易打错，
+ * 而且打错的后果是"文件功能静默不可用"（路径不存在 → workspaceRoot() 返回 null），
+ * 那种失败很难查。
+ */
+export async function pickDirectory(win: BrowserWindow | null): Promise<string | null> {
+  const result = await dialog.showOpenDialog(win ?? undefined!, {
+    title: '选一个目录给她读写',
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  if (result.canceled || !result.filePaths.length) return null
+  return result.filePaths[0]
+}

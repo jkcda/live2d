@@ -19,6 +19,7 @@ import express from 'express'
 import cors from 'cors'
 import { PORT } from './config.js'
 import { chatRouter } from './routes/chat.js'
+import { setWorkspace, workspaceDetail } from './services/files.js'
 import { initMcp, closeMcp, getMcpStatus } from './services/mcp.js'
 import { listEntries } from './services/memory.js'
 
@@ -35,6 +36,29 @@ app.get('/health', (_req, res) => {
     mcp: getMcpStatus(),
     memoryFiles: listEntries().length,
   })
+})
+
+/*
+ * 文件工作区 —— 她能读写的那个目录。
+ *
+ * ★ 为什么由 agent 持有这个状态，而不是前端存 localStorage
+ *
+ * 安全边界在**服务端**。前端存的话，任何人都能 POST 一个 `/chat` 带上
+ * 任意"工作区"（那等于没有边界）。这里定，`services/files.ts` 执行。
+ *
+ * ★ 为什么不是环境变量
+ *
+ * 环境变量改不了运行时状态，而设置面板要能当场改 —— 改完不用重启。
+ * 环境变量现在只是**初始值**，优先级低于这里存过的值（落盘在 data/workspace.json）。
+ */
+app.get('/workspace', (_req, res) => {
+  res.json(workspaceDetail())
+})
+
+app.post('/workspace', (req, res) => {
+  const dir = typeof req.body?.path === 'string' ? req.body.path : ''
+  setWorkspace(dir)
+  res.json(workspaceDetail())
 })
 
 app.use(chatRouter)

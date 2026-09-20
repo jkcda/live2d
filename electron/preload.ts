@@ -71,6 +71,9 @@ contextBridge.exposeInMainWorld('nexus', {
    */
   pickImage: () => ipcRenderer.invoke('file:pickImage'),
 
+  /** 弹系统对话框选一个工作区目录。取消返回 null。 */
+  pickWorkspace: () => ipcRenderer.invoke('file:pickWorkspace'),
+
   /** 拖拽进来的文件：从路径读图（同样在主进程转换） */
   imageFromPath: (filePath: string) => ipcRenderer.invoke('file:imageFromPath', filePath),
 

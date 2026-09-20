@@ -183,3 +183,48 @@ export async function probeAgent(url: string): Promise<{ ok: boolean; detail: st
     return { ok: false, detail: err instanceof Error ? err.message : String(err) }
   }
 }
+
+/** 工作区状态（agent 是唯一权威 —— 安全边界在服务端） */
+export interface WorkspaceState {
+  enabled: boolean
+  path: string | null
+  /** 路径存过但现在打不开（被删了 / 改名了） */
+  error?: string
+}
+
+/** 读当前工作区。agent 没起来返回 null。 */
+export async function fetchWorkspace(url: string): Promise<WorkspaceState | null> {
+  try {
+    const resp = await fetch(`${url.replace(/\/+$/, '')}/workspace`, {
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!resp.ok) return null
+    return (await resp.json()) as WorkspaceState
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 设置工作区。传空字符串 = 关掉。
+ *
+ * ★ 为什么走服务端而不是前端存 localStorage
+ *
+ * 安全边界必须在**服务端**。前端存的话，任何能 POST /chat 的人都能带一个
+ * 自定的"工作区"进来 —— 那等于没有边界。这里只是把用户的意图告诉服务端，
+ * 真正执行拒绝的是 services/files.ts。
+ */
+export async function updateWorkspace(url: string, dir: string): Promise<WorkspaceState | null> {
+  try {
+    const resp = await fetch(`${url.replace(/\/+$/, '')}/workspace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: dir }),
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!resp.ok) return null
+    return (await resp.json()) as WorkspaceState
+  } catch {
+    return null
+  }
+}
