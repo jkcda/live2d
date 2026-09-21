@@ -89,7 +89,10 @@ live2d/
 ├── .env.example                 # compose 读的环境变量模板（.env 已 gitignore）
 ├── electron/
 │   ├── main.ts                  # 窗口：透明/置顶/点击穿透/全局快捷键
-│   └── preload.ts               # 暴露给渲染进程的桥接口
+│   ├── preload.ts               # 暴露给渲染进程的桥接口
+│   ├── screen.ts                # 截屏 + 隐私黑名单 + 变化门控
+│   ├── observer.ts              # 前台窗口观察（她在看你用什么）
+│   └── files.ts                 # 本地图片 → data URL（读取/缩放/编码都在这）
 ├── src/
 │   ├── App.vue                  # 根组件：舞台 + 控制条 + 面板挂载
 │   ├── components/
@@ -103,6 +106,7 @@ live2d/
 │   │   │   ├── llm.ts           # 直连 OpenAI 兼容接口（降级路径）+ 按标点切句
 │   │   │   ├── persona.ts       # 人设提示词（含语气标记的说明）
 │   │   │   └── emotion.ts       # 语气标记 → 给人看的字（[laughter] → （笑））
+│   │   └── （agent 自己的服务在 agent/src/services/，含 files.ts —— 文件读写的安全边界）
 │   │   ├── character/           # 角色：角色包 / 能力探测 / 两个渲染器的共同接口
 │   │   │   ├── types.ts         # CharacterStage / CharacterFrame：两个渲染器的共同接口
 │   │   │   ├── packs.ts         # 角色包：清单、素材探测、能力表、按角色调参
