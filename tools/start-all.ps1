@@ -147,7 +147,13 @@ Write-Host "`n=== 拉起服务（日志在 logs\）===" -ForegroundColor Cyan
     它要加载 2.65GB 显存、花十几秒预热，而那时根本用不上它。
     显存留给别的东西，或者干脆省下来。
 #>
-$ttsEngine = if ($env:NEXUS_TTS_ENGINE) { $env:NEXUS_TTS_ENGINE } else { "cosyvoice" }
+# 本地模型没装就自动走线上 —— 免得删了模型之后 start-all 还去启动一个不存在的服务。
+# （2026-09-26：本地 CosyVoice 已卸载，转用线上 TTS。想装回来就把模型放回
+#   $cosyRoot 下面，这里会自动重新认出来，不用改代码。）
+$cosyRootDefault = if ($env:NEXUS_COSY_ROOT) { $env:NEXUS_COSY_ROOT } else { "D://cosyvoice" }
+$localModelReady = Test-Path (Join-Path $cosyRootDefault "pretrained_models\CosyVoice2-0.5B")
+$defaultEngine = if ($localModelReady) { "cosyvoice" } else { "openai" }
+$ttsEngine = if ($env:NEXUS_TTS_ENGINE) { $env:NEXUS_TTS_ENGINE } else { $defaultEngine }
 # 提到哈希表外面：PowerShell 5.1 里 `@{ k = if (...) {} }` 是语法错误（7 才允许）
 $apiModel = if ($env:NEXUS_TTS_API_MODEL) { $env:NEXUS_TTS_API_MODEL } else { "tts-1" }
 

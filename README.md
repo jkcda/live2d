@@ -452,6 +452,12 @@ Live2D 模型、Cubism Core、角色立绘、音色素材 —— 全在 `.docker
 - [x] **文件读写**（`list_dir` / `read_file` / `write_file`）——
       工作区隔离 + 凭据黑名单 + 不能覆盖已有文件；**默认关闭**，设置面板里选目录
 - [x] **给她看本地图片**（主进程读 → 缩放 1280 → data URL → 挂在消息的 `image_url` 上）
+- [x] ~~本地 CosyVoice 模型~~ **已卸载**（2026-09-26）——
+      这台机器（4060 Laptop 8G）跑不动本地模型：显存紧、RTF > 1。
+      现在走**线上 TTS**（`tools/tts-api.env`，引擎 `openai`）。
+      音色没丢：**已经克隆到云端**（voice uri 在 `tts-api.env` 里），
+      参考音频备份在 `D://nexus//_voice-backup//`。
+      `start-all.cmd` 会**自动探测**本地模型在不在，不在就走线上 —— 想装回来不用改代码。
 
 > **现在就能验证的完整链路**：起 `python -m service.main`（默认 tone 引擎，不需要 GPU 和模型），
 > 再起 `pnpm dev:web`，填个 API key，打开麦克风 —— 说话时她会立刻闭嘴（barge-in），
